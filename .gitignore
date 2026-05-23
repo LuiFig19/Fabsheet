@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+build
+*.log
+.env
+.env.local
+.DS_Store
+next-env.d.ts
+
+# dev uploads
+/uploads/*
+!/uploads/.gitkeep
+
+# backups
+/backups/*

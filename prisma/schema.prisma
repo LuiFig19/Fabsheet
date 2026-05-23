@@ -1,0 +1,213 @@
+// Raven's Marine timesheet app. Postgres (local Docker / Proxmox).
+
+generator client {
+  provider      = "prisma-client-js"
+  // native = local dev (Windows). musl = Alpine Docker. rhel = Vercel runtime.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Tenant = a customer company on the TrackSheet platform. In single_tenant
+// mode there is exactly one (Raven's). Identity + branding live here.
+model Tenant {
+  id           String     @id @default(cuid())
+  slug         String     @unique // "ravens"
+  name         String // "Raven's Marine"
+  displayName  String     @default("") // shown in the app header
+  logoUrl      String?
+  primaryColor String     @default("222 47% 16%") // HSL triplet for theming
+  contactEmail String     @default("")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  divisions    Division[]
+  users        User[]
+}
+
+model Division {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String // "Welding"
+  slug         String // "welding"
+  contactEmail String   @default("")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+
+model User {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email          String
+  name           String    @default("")
+  role           String    @default("manager") // admin | manager | viewer
+  divisionAccess String[]  @default([]) // division IDs, empty = all
+  active         Boolean   @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+// Per-tenant operational config (thresholds, caps, keys, report defaults).
+// One row per tenant. Branding/identity is on Tenant.
+model Company {
+  id                String   @id @default(cuid())
+  tenantId          String?  @unique // links to Tenant; backfilled
+  name              String   @default("Raven's Marine")
+  address           String   @default("")
+  phone             String   @default("")
+  logoPath          String? // relative path under /uploads
+  defaultEmailTo    String   @default("") // comma-separated recipients
+  ocrThreshold      Float    @default(0.7) // below this, a field is flagged
+  dailyApiCap       Int      @default(100) // max Claude Vision calls per day
+  anthropicKeyEnc   String? // AES-encrypted; env ANTHROPIC_API_KEY takes precedence
+  resendKeyEnc      String? // AES-encrypted; env RESEND_API_KEY takes precedence
+  resendFrom        String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Employee {
+  id         String            @id @default(cuid())
+  tenantId   String?
+  divisionId String?
+  name       String
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  uploads    TimesheetUpload[]
+  entries    TimesheetEntry[]
+
+  @@index([tenantId])
+  @@index([divisionId])
+}
+
+model LaborCode {
+  id          String  @id @default(cuid())
+  tenantId    String?
+  code        String // "110"
+  description String // "Weld/Fab"
+  active      Boolean @default(true)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model TaskDescription {
+  id       String  @id @default(cuid())
+  tenantId String?
+  name     String // "Frame"
+  active   Boolean @default(true)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model Job {
+  id              String           @id @default(cuid())
+  tenantId        String?
+  divisionId      String?
+  workOrderNumber String // "4354"
+  customerName    String           @default("")
+  partId          String           @default("")
+  description     String           @default("")
+  budgetedHours   Float            @default(0)
+  status          String           @default("active") // active | complete | on_hold
+  notes           String           @default("")
+  createdAt       DateTime         @default(now())
+  completedAt     DateTime?
+  entries         TimesheetEntry[]
+
+  @@index([tenantId])
+  @@index([divisionId])
+}
+
+model TimesheetUpload {
+  id               String           @id @default(cuid())
+  tenantId         String?
+  divisionId       String?
+  filePath         String // local disk path (dev) or relative key
+  storageKey       String? // R2 object key (prod)
+  storageUrl       String? // R2/public URL if available
+  fileHash         String           @default("")
+  mimeType         String           @default("")
+  employeeId       String?
+  employee         Employee?        @relation(fields: [employeeId], references: [id])
+  shiftStart       String           @default("") // HH:MM
+  shiftEnd         String           @default("")
+  date             DateTime
+  status           String           @default("uploaded") // uploaded | extracting | needs_review | approved
+  extractorName    String           @default("")
+  rawExtractedJson Json?
+  warnings         Json? // string[]
+  createdAt        DateTime         @default(now())
+  entries          TimesheetEntry[]
+
+  @@index([tenantId])
+  @@index([divisionId])
+}
+
+model TimesheetEntry {
+  id                String          @id @default(cuid())
+  tenantId          String?
+  divisionId        String?
+  uploadId          String
+  upload            TimesheetUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  employeeId        String?
+  employee          Employee?       @relation(fields: [employeeId], references: [id])
+  jobId             String?
+  job               Job?            @relation(fields: [jobId], references: [id])
+  workOrderNumber   String          @default("")
+  customerName      String          @default("")
+  partId            String          @default("")
+  description       String          @default("")
+  laborCode         String          @default("")
+  startTime         String          @default("") // HH:MM
+  endTime           String          @default("")
+  decimalHours      Float           @default(0)
+  hoursOverridden   Boolean         @default(false)
+  notes             String          @default("")
+  confidenceByField Json? // Record<string, number>
+  status            String          @default("needs_review") // needs_review | approved
+  approvedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([tenantId])
+  @@index([divisionId])
+}
+
+// Cache Claude Vision results by file hash so re-uploading the same image
+// (manager retries) does not pay for a second API call.
+model OcrCache {
+  id         String   @id @default(cuid())
+  fileHash   String   @unique
+  model      String
+  resultJson Json
+  createdAt  DateTime @default(now())
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  entityType   String
+  entityId     String
+  action       String // edit | approve | create | delete | ocr_call | ocr_cap_block
+  before       Json?
+  after        Json?
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  model        String?
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId])
+}
