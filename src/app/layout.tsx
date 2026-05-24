@@ -38,13 +38,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <div className="min-h-screen bg-muted/30">
           {showChrome && (
-            <header className="bg-navy text-navy-foreground" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-              <div className="container flex h-16 items-center justify-between gap-4">
-                <Link href="/" className="flex items-center gap-2.5">
-                  <span className="rounded-md bg-white/15 px-2 py-1 text-sm font-bold">{initials(companyName)}</span>
-                  <div className="leading-tight">
-                    <div className="text-sm font-semibold">{companyName}</div>
-                    <div className="text-xs text-white/60">Timesheet to job costing</div>
+            <header
+              className="relative bg-navy text-navy-foreground"
+              style={{ paddingTop: "env(safe-area-inset-top)" }}
+            >
+              <div className="container flex h-16 items-center justify-between gap-2 sm:gap-4">
+                <Link href="/" className="flex min-w-0 items-center gap-2.5">
+                  <span className="shrink-0 rounded-md bg-white/15 px-2 py-1 text-sm font-bold">
+                    {initials(companyName)}
+                  </span>
+                  <div className="min-w-0 leading-tight">
+                    <div className="truncate text-sm font-semibold">{companyName}</div>
+                    {/* Subtitle is dead weight on phones; only show from sm up. */}
+                    <div className="hidden text-xs text-white/60 sm:block">Timesheet to job costing</div>
                   </div>
                 </Link>
                 <Nav />
