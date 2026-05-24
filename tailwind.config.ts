@@ -4,7 +4,12 @@ const config: Config = {
   darkMode: ["class"],
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
-    container: { center: true, padding: "1.5rem", screens: { "2xl": "1440px" } },
+    container: {
+      center: true,
+      // Tighter horizontal padding on phones so the header has room.
+      padding: { DEFAULT: "1rem", sm: "1.5rem", lg: "2rem" },
+      screens: { "2xl": "1440px" },
+    },
     extend: {
       colors: {
         border: "hsl(var(--border))",
