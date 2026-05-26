@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
+import { auth } from "@/lib/auth";
 import { getTenantContextSafe } from "@/lib/tenant";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -31,12 +33,17 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const ctx = await getTenantContextSafe();
+  // The shell (sidebar + topbar) only renders for AUTHENTICATED users. The
+  // /login page is unauth so it gets a clean centered layout. We check the
+  // session directly so it's not coupled to tenant resolution (single_tenant
+  // always resolves a tenant even when nobody is signed in).
+  const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
+  const ctx = session ? await getTenantContextSafe() : null;
   const company = ctx?.tenant.displayName || ctx?.tenant.name || PRODUCT;
   const user = ctx?.user
     ? { name: ctx.user.name, email: ctx.user.email, role: ctx.user.role }
     : null;
-  const showShell = Boolean(ctx); // hide nav on /login
+  const showShell = Boolean(session && ctx);
 
   return (
     <html lang="en" suppressHydrationWarning>
