@@ -29,6 +29,52 @@ export function fmtHours(h: number): string {
   return (Math.round((h || 0) * 100) / 100).toFixed(2);
 }
 
+/**
+ * Classify a Raven's labor code as production-hours (true) vs. overhead/support
+ * (false). The 1xx series is direct fabrication work (Weld/Fab, Cut, Decking,
+ * Floats, Bumper, Helping Welder, Special Projects, Fit-Up/Install). The 2xx
+ * series is non-production support time (Shipping Prep, Wash, Load/Unload,
+ * Welding Machine Repair, Admin, Maintenance, Inventory). Anything else
+ * (blank, "999 Other") counts as non-productive.
+ *
+ * Entries store the labor code as a string like "110 Weld/Fab", so we read the
+ * first run of digits.
+ */
+export function isProductiveCode(laborCode: string | null | undefined): boolean {
+  if (!laborCode) return false;
+  const m = /^\s*(\d+)/.exec(laborCode);
+  if (!m) return false;
+  return m[1].startsWith("1");
+}
+
+/**
+ * Mon 00:00 of this work week, Sat 00:00 (= end of Fri), and how many work days
+ * are left including today. Sat/Sun roll forward: the next Mon-Fri is "this
+ * work week" with all 5 days remaining and zero hours logged so far.
+ */
+export function workWeekProgress(now = new Date()) {
+  const ref = new Date(now);
+  ref.setHours(0, 0, 0, 0);
+  const dow = ref.getDay(); // 0=Sun..6=Sat
+  // On Sat/Sun, jump to next Monday so the goal resets cleanly.
+  const onWeekend = dow === 0 || dow === 6;
+  const monday = new Date(ref);
+  if (onWeekend) {
+    monday.setDate(ref.getDate() + (dow === 6 ? 2 : 1));
+  } else {
+    monday.setDate(ref.getDate() - (dow - 1));
+  }
+  const saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+
+  // Mon=5 remaining (Mon..Fri), Tue=4, Wed=3, Thu=2, Fri=1, weekend=5 (next week)
+  const todayDow = onWeekend ? 1 : dow; // treat weekends as "Monday of next week"
+  const daysRemaining = onWeekend ? 5 : 5 - (todayDow - 1);
+
+  return { weekStart: monday, weekEnd: saturday, daysRemaining, onWeekend };
+}
+
+
 export function fmtMoney(n: number): string {
   return `$${(Math.round((n || 0) * 100) / 100).toFixed(2)}`;
 }

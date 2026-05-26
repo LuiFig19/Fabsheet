@@ -16,6 +16,7 @@ import {
   updateCompany,
   updateOcrSettings,
 } from "@/lib/settings-actions";
+import { DangerZone } from "./danger-zone";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ function startOfToday(): Date {
 export default async function SettingsPage() {
   const ctx = await getTenantContext();
   const tw = tenantWhere(ctx);
-  const [company, employees, codes, descriptions, usage] = await Promise.all([
+  const [company, employees, codes, descriptions, usage, entryCount, uploadCount, jobCount] = await Promise.all([
     prisma.company.findFirst({ where: tw }),
     prisma.employee.findMany({ where: tw, orderBy: { name: "asc" } }),
     prisma.laborCode.findMany({ where: tw, orderBy: { code: "asc" } }),
@@ -38,6 +39,9 @@ export default async function SettingsPage() {
       _count: true,
       _sum: { inputTokens: true, outputTokens: true, costUsd: true },
     }),
+    prisma.timesheetEntry.count({ where: tw }),
+    prisma.timesheetUpload.count({ where: tw }),
+    prisma.job.count({ where: tw }),
   ]);
 
   const anthropicSource = process.env.ANTHROPIC_API_KEY
@@ -95,7 +99,15 @@ export default async function SettingsPage() {
                 <Input name="dailyApiCap" type="number" step="1" min="0" defaultValue={company?.dailyApiCap ?? 100} />
                 <span className="text-xs text-muted-foreground">Over this, uploads fall back to mock to protect the budget.</span>
               </label>
-              <Button type="submit">Save OCR settings</Button>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Weekly production target (hours)</span>
+                <Input name="weeklyProductionTarget" type="number" step="10" min="0" defaultValue={company?.weeklyProductionTarget ?? 850} />
+                <span className="text-xs text-muted-foreground">
+                  Productive hours (codes 110-189) needed Mon-Fri. Drives the dashboard goal panel. 2xx codes
+                  (machine repair, forklift, wash, etc) are tracked but do not count toward this target.
+                </span>
+              </label>
+              <Button type="submit">Save settings</Button>
             </form>
           </CardContent>
         </Card>
@@ -197,6 +209,18 @@ export default async function SettingsPage() {
           toggleAction={toggleDescription}
         />
       </div>
+
+      <DangerZone
+        counts={{
+          entries: entryCount,
+          uploads: uploadCount,
+          jobs: jobCount,
+          employees: employees.length,
+          laborCodes: codes.length,
+          taskDescriptions: descriptions.length,
+          hasStoredKeys: Boolean(company?.anthropicKeyEnc || company?.resendKeyEnc),
+        }}
+      />
     </div>
   );
 }

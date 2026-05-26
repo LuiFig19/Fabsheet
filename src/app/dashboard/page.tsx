@@ -4,23 +4,30 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { prisma } from "@/lib/db";
-import { approvedHoursByJob, weekRange } from "@/lib/queries";
-import { getTenantContext, scopeWhere } from "@/lib/tenant";
-import { budgetTier, fmtHours, formatDate } from "@/lib/utils";
-import { Upload, ClipboardCheck, AlertTriangle, ArrowRight } from "lucide-react";
+import { approvedHoursByJob } from "@/lib/queries";
+import { getTenantContext, scopeWhere, tenantWhere } from "@/lib/tenant";
+import { budgetTier, fmtHours, formatDate, workWeekProgress } from "@/lib/utils";
+import { Upload, ClipboardCheck, AlertTriangle, ArrowRight, Target } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const ctx = await getTenantContext();
   const s = scopeWhere(ctx);
-  const { start, end } = weekRange();
+  const { weekStart, weekEnd, daysRemaining, onWeekend } = workWeekProgress();
 
-  const [jobs, usedByJob, weekAgg, jobsInProgress, needsReviewCount, recent] = await Promise.all([
+  const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company] = await Promise.all([
     prisma.job.findMany({ where: { ...s, status: "active" }, orderBy: { workOrderNumber: "asc" } }),
     approvedHoursByJob(ctx),
+    // Productive = labor codes 1xx (Weld/Fab, Cut, Decking, Floats, Bumper,
+    // Helping Welder, Special Projects, Fit-Up/Install).
     prisma.timesheetEntry.aggregate({
-      where: { ...s, status: "approved", upload: { date: { gte: start, lt: end } } },
+      where: { ...s, status: "approved", laborCode: { startsWith: "1" }, upload: { date: { gte: weekStart, lt: weekEnd } } },
+      _sum: { decimalHours: true },
+    }),
+    // Non-production = anything else (2xx machine repair, forklift, wash, admin, etc.).
+    prisma.timesheetEntry.aggregate({
+      where: { ...s, status: "approved", NOT: { laborCode: { startsWith: "1" } }, upload: { date: { gte: weekStart, lt: weekEnd } } },
       _sum: { decimalHours: true },
     }),
     prisma.job.count({ where: { ...s, status: "active" } }),
@@ -31,14 +38,27 @@ export default async function DashboardPage() {
       take: 6,
       include: { employee: true, _count: { select: { entries: true } } },
     }),
+    prisma.company.findFirst({ where: tenantWhere(ctx) }),
   ]);
 
-  const hoursThisWeek = weekAgg._sum.decimalHours ?? 0;
+  const productiveThisWeek = productiveAgg._sum.decimalHours ?? 0;
+  const supportThisWeek = supportAgg._sum.decimalHours ?? 0;
+  const productionTarget = company?.weeklyProductionTarget ?? 850;
+  const productivePct = productionTarget > 0 ? (productiveThisWeek / productionTarget) * 100 : 0;
+  const remainingHours = Math.max(0, productionTarget - productiveThisWeek);
+  const perDay = daysRemaining > 0 ? remainingHours / daysRemaining : 0;
+  const onTrack = productivePct >= 100;
+
   const overBudget = jobs.filter((j) => budgetTier(usedByJob.get(j.id) ?? 0, j.budgetedHours) === "red").length;
   const uploadsNeedingReview = await prisma.timesheetUpload.count({ where: { ...s, status: "needs_review" } });
 
   const stats = [
-    { label: "Hours this week", value: fmtHours(hoursThisWeek) },
+    {
+      label: "Productive hours this week",
+      value: `${fmtHours(productiveThisWeek)} / ${productionTarget}`,
+      sub: `+${fmtHours(supportThisWeek)} h support`,
+      warn: !onTrack && !onWeekend && daysRemaining <= 2,
+    },
     { label: "Jobs in progress", value: String(jobsInProgress) },
     { label: "Jobs over budget", value: String(overBudget), danger: overBudget > 0 },
     { label: "Uploads needing review", value: String(uploadsNeedingReview), warn: uploadsNeedingReview > 0 },
@@ -50,7 +70,7 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            Week of {formatDate(start)}. {needsReviewCount} row{needsReviewCount === 1 ? "" : "s"} waiting on review.
+            Week of {formatDate(weekStart)}. {needsReviewCount} row{needsReviewCount === 1 ? "" : "s"} waiting on review.
           </p>
         </div>
         <Button asChild size="lg" className="min-h-[44px]">
@@ -68,16 +88,29 @@ export default async function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div
-                className={`text-3xl font-bold tabular-nums ${
+                className={`text-2xl font-bold tabular-nums sm:text-3xl ${
                   s.danger ? "text-red-600" : s.warn ? "text-amber-600" : ""
                 }`}
               >
                 {s.value}
               </div>
+              {s.sub && <div className="mt-1 text-xs text-muted-foreground">{s.sub}</div>}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      <ProductionGoalCard
+        target={productionTarget}
+        productive={productiveThisWeek}
+        support={supportThisWeek}
+        pct={productivePct}
+        remaining={remainingHours}
+        perDay={perDay}
+        daysRemaining={daysRemaining}
+        onWeekend={onWeekend}
+        onTrack={onTrack}
+      />
 
       <div>
         <div className="mb-3 flex items-center justify-between">
@@ -163,4 +196,58 @@ function StatusBadge({ status }: { status: string }) {
   if (status === "extracting") return <Badge variant="muted">extracting</Badge>;
   if (status === "uploaded") return <Badge variant="danger">extract failed</Badge>;
   return <Badge variant="warning">needs review</Badge>;
+}
+
+function ProductionGoalCard({
+  target, productive, support, pct, remaining, perDay, daysRemaining, onWeekend, onTrack,
+}: {
+  target: number; productive: number; support: number; pct: number;
+  remaining: number; perDay: number; daysRemaining: number; onWeekend: boolean; onTrack: boolean;
+}) {
+  // Visual tier mirrors the job-progress colors.
+  const tier: "green" | "yellow" | "red" =
+    onTrack ? "green" : pct >= 75 ? "yellow" : daysRemaining <= 2 ? "red" : "yellow";
+  const bar = tier === "green" ? "bg-emerald-500" : tier === "yellow" ? "bg-amber-500" : "bg-red-500";
+  const headline = onTrack
+    ? `Target hit — ${fmtHours(productive - target)} h over the line.`
+    : onWeekend
+      ? `Work week is over. ${remaining > 0 ? `Missed by ${fmtHours(remaining)} h.` : "Goal hit."} Next week starts Monday at 0 / ${target}.`
+      : daysRemaining === 0
+        ? `End of Friday. ${remaining > 0 ? `Short ${fmtHours(remaining)} h on this week.` : "Goal hit."}`
+        : `Need ${fmtHours(remaining)} more production hours by Friday — ${fmtHours(perDay)} h/day across ${daysRemaining} working day${daysRemaining === 1 ? "" : "s"} left.`;
+
+  return (
+    <Card className={tier === "red" ? "border-red-300" : tier === "yellow" ? "border-amber-300" : "border-emerald-300"}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-foreground">
+          <Target className="h-4 w-4" /> Weekly production goal
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="text-2xl font-bold tabular-nums sm:text-3xl">
+            {fmtHours(productive)}
+            <span className="text-base font-normal text-muted-foreground"> / {target} h</span>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {fmtHours(support)} h non-production this week (machine repair, forklift, wash, admin)
+          </div>
+        </div>
+
+        <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full ${bar} transition-all`}
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant={tier === "green" ? "success" : tier === "yellow" ? "warning" : "danger"}>
+            {Math.round(pct)}%
+          </Badge>
+          <span className={tier === "red" ? "font-medium text-red-700" : "text-foreground"}>{headline}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
