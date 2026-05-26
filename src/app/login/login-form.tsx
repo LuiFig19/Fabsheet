@@ -22,13 +22,21 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
       return;
     }
     startTransition(async () => {
-      const res = await signIn.magicLink({ email, callbackURL: nextUrl });
-      if ("error" in res && res.error) {
-        // Generic message so we don't leak which emails exist.
-        setError("Could not send the link. Try again in a moment.");
-        return;
+      try {
+        const res = await signIn.magicLink({ email, callbackURL: nextUrl });
+        if (res && typeof res === "object" && "error" in res && res.error) {
+          // Surface BetterAuth's message so misconfig is obvious to the admin,
+          // but still tell the end user a generic line.
+          console.error("[login] BetterAuth error", res.error);
+          setError(`Could not send the link. (${(res.error as { message?: string }).message ?? "unknown error"})`);
+          return;
+        }
+        setSent(true);
+      } catch (err) {
+        console.error("[login] signIn threw", err);
+        const msg = err instanceof Error ? err.message : "Network error.";
+        setError(`Could not send the link. (${msg})`);
       }
-      setSent(true);
     });
   }
 

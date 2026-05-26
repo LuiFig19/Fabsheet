@@ -21,9 +21,32 @@ function isAllowed(email: string): boolean {
  * mode silently no-ops for non-listed emails so we don't leak which addresses
  * exist on Raven's deploy.
  */
+// Build the list of origins BetterAuth should accept requests from. Includes
+// both the bare deploy origin (vercel.app, fabsheet.org) AND the prefixed
+// origin in case path-prefixed URLs are submitted as origins. Vercel preview
+// URLs are also covered via a wildcard so PR previews don't blow up.
+function buildTrustedOrigins(): string[] {
+  const out = new Set<string>();
+  const candidates = [process.env.BETTER_AUTH_URL, process.env.NEXT_PUBLIC_APP_URL].filter(Boolean) as string[];
+  for (const c of candidates) {
+    try {
+      const u = new URL(c);
+      out.add(`${u.protocol}//${u.host}`);
+      out.add(c.replace(/\/$/, ""));
+    } catch {
+      // ignore malformed URLs
+    }
+  }
+  // Local dev
+  out.add("http://localhost:3000");
+  out.add("http://localhost:3000/r/8h3kd92ksjf");
+  return Array.from(out);
+}
+
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL,
+  trustedOrigins: buildTrustedOrigins(),
   database: prismaAdapter(prisma, { provider: "postgresql" }),
   session: {
     expiresIn: 60 * 60 * 24 * 30, // 30 days
