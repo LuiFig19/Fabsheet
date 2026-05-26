@@ -95,9 +95,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 {job.entries.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell>{formatDate(e.createdAt)}</TableCell>
-                    <TableCell className="font-medium">{e.employee?.name ?? "—"}</TableCell>
-                    <TableCell>{e.laborCode || "—"}</TableCell>
-                    <TableCell>{e.description || "—"}</TableCell>
+                    <TableCell className="font-medium">{e.employee?.name ?? "-"}</TableCell>
+                    <TableCell>{e.laborCode || "-"}</TableCell>
+                    <TableCell>{e.description || "-"}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtHours(e.decimalHours)}</TableCell>
                   </TableRow>
                 ))}

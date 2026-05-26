@@ -21,7 +21,7 @@ export const extractedHeaderSchema = z.object({
  * One row on the V5 timesheet. The form has 7 rows; empty rows are returned as
  * null in the rows[] array so the welder's position is preserved.
  *
- * The form has NO customer / labor code / part id fields — those are derived
+ * The form has NO customer / labor code / part id fields - those are derived
  * on the server from `jobNumber` (via Jobs table) and the bubble selection
  * (via TASK_TO_CODE mapping). The vision model must not invent them.
  */

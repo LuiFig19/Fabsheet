@@ -38,7 +38,7 @@ export type UploadResult =
   | { ok: false; error: string; configure?: boolean };
 
 /**
- * Critical path. V5: the manager does NOT pick the employee or date — the OCR
+ * Critical path. V5: the manager does NOT pick the employee or date - the OCR
  * reads them from the header and we fuzzy-match the employee + parse the date.
  * If either can't be determined the upload still saves and the Review screen
  * banner asks for it.

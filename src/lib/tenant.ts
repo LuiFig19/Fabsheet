@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import type { Tenant, Division, User } from "@prisma/client";
 
 export type TenancyMode = "single_tenant" | "multi_tenant";
@@ -35,6 +36,12 @@ export function defaultTenantSlug(): string {
 export const getTenantContext = cache(async (): Promise<TenantContext> => {
   const mode = appMode();
   const h = await headers();
+  // Identify the signed-in user via BetterAuth. In single_tenant mode this is
+  // for chrome/audit only; the tenant is still resolved from the env slug.
+  const session = await auth.api.getSession({ headers: h }).catch(() => null);
+  const sessionUser = session?.user
+    ? await prisma.user.findUnique({ where: { id: session.user.id } })
+    : null;
 
   if (mode === "single_tenant") {
     const slug = h.get("x-tenant-slug") || defaultTenantSlug();
@@ -43,25 +50,28 @@ export const getTenantContext = cache(async (): Promise<TenantContext> => {
       where: { tenantId: tenant.id, active: true },
       orderBy: { createdAt: "asc" },
     });
-    // Auto-pick only when there is exactly one division (no UI picker for Raven's).
     const division = divisions.length === 1 ? divisions[0] : pickDivision(divisions, h.get("x-division-id"));
-    return { tenant, division, user: null, mode };
+    // Lazy-link signed-in user to the tenant the first time we see them, so
+    // audit logs attribute correctly and the sidebar shows a useful identity.
+    let user = sessionUser;
+    if (user && user.tenantId !== tenant.id) {
+      user = await prisma.user.update({ where: { id: user.id }, data: { tenantId: tenant.id, lastLoginAt: new Date() } });
+    }
+    return { tenant, division, user, mode };
   }
 
   // multi_tenant
+  if (!sessionUser) throw new Error("Unauthenticated.");
   const slug = h.get("x-tenant-slug");
-  const userId = h.get("x-user-id");
-  if (!slug || !userId) {
-    throw new Error("Unauthenticated: no tenant/user context in multi_tenant mode.");
-  }
+  if (!slug) throw new Error("No tenant slug in URL.");
   const tenant = await resolveTenant(slug);
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || user.tenantId !== tenant.id || !user.active) {
+  if (sessionUser.tenantId && sessionUser.tenantId !== tenant.id) {
     throw new Error("Forbidden: user does not belong to this tenant.");
   }
+  if (!sessionUser.active) throw new Error("Account is disabled.");
   const divisions = await prisma.division.findMany({ where: { tenantId: tenant.id, active: true }, orderBy: { createdAt: "asc" } });
   const division = pickDivision(divisions, h.get("x-division-id"));
-  return { tenant, division, user, mode };
+  return { tenant, division, user: sessionUser, mode };
 });
 
 /** Non-throwing variant for shared chrome (layout, metadata) that must render

@@ -16,7 +16,7 @@ function normalizeMime(mimeType: string): string {
 
 /**
  * Compress an uploaded image before sending to Claude Vision. Vision's useful
- * resolution caps around 1568px on the long edge — bigger images add seconds
+ * resolution caps around 1568px on the long edge - bigger images add seconds
  * of upload + processing without improving accuracy on handwriting. A typical
  * 4000x3000 phone photo (~5 MB) becomes ~250 KB at quality 85.
  *
@@ -45,7 +45,7 @@ export async function compressForVision(buffer: Buffer, mimeType: string): Promi
  * error fed back, and gives up with a clear error if the model still can't
  * comply.
  *
- * PDFs are sent as a native document block (Claude reads PDFs directly — no
+ * PDFs are sent as a native document block (Claude reads PDFs directly - no
  * local rasterization). Images are sent as image blocks. All images are
  * pre-compressed by compressForVision().
  */

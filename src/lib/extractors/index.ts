@@ -66,7 +66,7 @@ export type ExtractionOutcome = {
  *     AuditLog, and cache real results by hash.
  */
 export async function runExtraction(file: Buffer, mimeType: string, tenantId?: string): Promise<ExtractionOutcome> {
-  // Compress phone photos to a Vision-friendly size BEFORE hashing — saves
+  // Compress phone photos to a Vision-friendly size BEFORE hashing - saves
   // 3-8s per call and makes the cache key match what we actually send.
   const compressed = await compressForVision(file, mimeType);
   const hash = sha256(compressed.buffer);

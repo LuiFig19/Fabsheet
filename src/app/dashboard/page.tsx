@@ -215,12 +215,12 @@ function ProductionGoalCard({
     onTrack ? "green" : pct >= 75 ? "yellow" : daysRemaining <= 2 ? "red" : "yellow";
   const bar = tier === "green" ? "bg-emerald-500" : tier === "yellow" ? "bg-amber-500" : "bg-red-500";
   const headline = onTrack
-    ? `Target hit — ${fmtHours(productive - target)} h over the line.`
+    ? `Target hit - ${fmtHours(productive - target)} h over the line.`
     : onWeekend
       ? `Work week is over. ${remaining > 0 ? `Missed by ${fmtHours(remaining)} h.` : "Goal hit."} Next week starts Monday at 0 / ${target}.`
       : daysRemaining === 0
         ? `End of Friday. ${remaining > 0 ? `Short ${fmtHours(remaining)} h on this week.` : "Goal hit."}`
-        : `Need ${fmtHours(remaining)} more production hours by Friday — ${fmtHours(perDay)} h/day across ${daysRemaining} working day${daysRemaining === 1 ? "" : "s"} left.`;
+        : `Need ${fmtHours(remaining)} more production hours by Friday - ${fmtHours(perDay)} h/day across ${daysRemaining} working day${daysRemaining === 1 ? "" : "s"} left.`;
 
   return (
     <Card className={tier === "red" ? "border-red-300" : tier === "yellow" ? "border-amber-300" : "border-emerald-300"}>

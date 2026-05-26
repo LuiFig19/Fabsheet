@@ -127,7 +127,7 @@ export function ReviewTable({
                   <TextCell value={e.workOrderNumber} low={isLow(e, "workOrderNumber") || e.jobMissing} onChange={(v) => setLocal(e.id, { workOrderNumber: v })} onCommit={(v) => persist(e.id, { workOrderNumber: v })} />
                 </TableCell>
                 <TableCell>
-                  <ReadOnly value={e.derivedCustomer || (e.workOrderNumber ? "— job not in system —" : "")} muted={!e.derivedCustomer} />
+                  <ReadOnly value={e.derivedCustomer || (e.workOrderNumber ? "- job not in system -" : "")} muted={!e.derivedCustomer} />
                 </TableCell>
                 <TableCell>
                   <UnitCell e={e} onCommit={(unitNumber, unitTotal) => persist(e.id, { unitNumber, unitTotal })} setLocal={(p) => setLocal(e.id, p)} />
@@ -144,7 +144,7 @@ export function ReviewTable({
                   />
                 </TableCell>
                 <TableCell>
-                  <ReadOnly value={e.derivedCode || "—"} muted={!e.derivedCode} title="Auto-filled from Task/Action bubble" />
+                  <ReadOnly value={e.derivedCode || "-"} muted={!e.derivedCode} title="Auto-filled from Task/Action bubble" />
                 </TableCell>
                 <TableCell>
                   <TimeCell value={e.startTime} low={isLow(e, "startTime")} onChange={(v) => setLocal(e.id, { startTime: v })} onCommit={() => persistTimes(e.id)} />
@@ -280,11 +280,11 @@ function UnitCell({ e, onCommit, setLocal }: { e: Entry; onCommit: (unitNumber: 
         value={e.unitNumber ?? ""}
         onChange={(ev) => setLocal({ unitNumber: ev.target.value === "" ? null : Number(ev.target.value) })}
         onBlur={(ev) => onCommit(ev.target.value, String(e.unitTotal ?? total ?? ""))}
-        placeholder="—"
+        placeholder="-"
         className="h-8 w-10 rounded-md border border-input bg-background px-1 text-center text-sm tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
       <span className="text-xs text-muted-foreground">of</span>
-      <span className="text-xs tabular-nums text-muted-foreground">{total ?? "—"}</span>
+      <span className="text-xs tabular-nums text-muted-foreground">{total ?? "-"}</span>
     </div>
   );
 }

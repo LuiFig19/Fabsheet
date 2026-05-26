@@ -163,11 +163,11 @@ export function DangerZone({ counts }: { counts: Counts }) {
               <div className="flex flex-col gap-2 pt-1">
                 <Button variant="destructive" className="min-h-[44px] w-full" disabled={pending}
                   onClick={() => run(() => clearTimesheets(true), "Failed to clear")}>
-                  <Trash2 className="h-4 w-4" /> Yes — clear timesheets AND jobs
+                  <Trash2 className="h-4 w-4" /> Yes - clear timesheets AND jobs
                 </Button>
                 <Button variant="destructive" className="min-h-[44px] w-full opacity-90" disabled={pending}
                   onClick={() => run(() => clearTimesheets(false), "Failed to clear")}>
-                  <Trash2 className="h-4 w-4" /> Yes — clear timesheets only (keep jobs)
+                  <Trash2 className="h-4 w-4" /> Yes - clear timesheets only (keep jobs)
                 </Button>
                 <Button variant="outline" className="min-h-[44px] w-full" onClick={close} disabled={pending}>
                   Cancel

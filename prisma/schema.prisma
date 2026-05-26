@@ -41,20 +41,73 @@ model Division {
   @@index([tenantId])
 }
 
+// BetterAuth user table. We extend it with tenancy + role columns the rest of
+// the app already uses. BetterAuth manages id/email/emailVerified/name/image
+// directly; tenantId / role / divisionAccess / active are ours.
 model User {
   id             String    @id @default(cuid())
-  tenantId       String
-  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  email          String
-  name           String    @default("")
+  email          String    @unique
+  emailVerified  Boolean   @default(false)
+  name           String?
+  image          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+  // App-level extensions:
+  tenantId       String?
+  tenant         Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   role           String    @default("manager") // admin | manager | viewer
-  divisionAccess String[]  @default([]) // division IDs, empty = all
+  divisionAccess String[]  @default([])
   active         Boolean   @default(true)
   lastLoginAt    DateTime?
-  createdAt      DateTime  @default(now())
+  // BetterAuth relations
+  sessions       Session[]
+  accounts       Account[]
 
-  @@unique([tenantId, email])
   @@index([tenantId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
 }
 
 // Per-tenant operational config (thresholds, caps, keys, report defaults).

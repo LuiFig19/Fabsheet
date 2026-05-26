@@ -84,9 +84,9 @@ export default async function ReportsPage({
                       <TableRow key={i}>
                         <TableCell className="tabular-nums">{r.date}</TableCell>
                         <TableCell className="font-medium">{r.employee}</TableCell>
-                        <TableCell>{r.workOrder || "—"}</TableCell>
-                        <TableCell>{r.code || "—"}</TableCell>
-                        <TableCell>{r.description || "—"}</TableCell>
+                        <TableCell>{r.workOrder || "-"}</TableCell>
+                        <TableCell>{r.code || "-"}</TableCell>
+                        <TableCell>{r.description || "-"}</TableCell>
                         <TableCell className="text-right tabular-nums">{fmtHours(r.hours)}</TableCell>
                       </TableRow>
                     ))}

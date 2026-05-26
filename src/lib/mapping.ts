@@ -10,7 +10,7 @@ import { computeDecimalHours } from "@/lib/utils";
  */
 export const TASK_TO_CODE: Record<string, string> = {
   // Component / fabrication tasks (all map to 110 Weld/Fab unless explicitly
-  // their own code — only Decking has its own).
+  // their own code - only Decking has its own).
   Frame: "110",
   Decking: "140",
   Rails: "110",
@@ -85,12 +85,12 @@ function rowIsBlank(r: ExtractedRow | null): boolean {
 /**
  * Convert raw OCR rows into editable entry drafts plus per-row warnings. Empty
  * rows are dropped (position is just for the OCR side). Customer + labor code
- * are DERIVED here — the manager never re-enters them.
+ * are DERIVED here - the manager never re-enters them.
  *
  * Rules for warnings (these are what flag in Review, nothing else):
  *  - JOB # not found in jobs[]  -> warn the row.
  *  - Both task AND action bubbles empty AND notes empty -> warn "no work
- *    indicated". (Notes alone = legitimate "Other" work — not flagged.)
+ *    indicated". (Notes alone = legitimate "Other" work - not flagged.)
  *  - UNIT validation against job.quantity per the iteration spec.
  */
 export function entriesFromExtraction(input: MappingInput): MappingOutput {

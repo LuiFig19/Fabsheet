@@ -62,7 +62,7 @@ export const JOBS: {
   status?: string;
 }[] = [
   { workOrderNumber: "4354", customerName: "RCCL RB1", description: "Royal Caribbean RB1", budgetedHours: 400, quantity: 1 },
-  // Coco Cay has 2 bridges — exercises the UNIT-of-N validation in Review.
+  // Coco Cay has 2 bridges - exercises the UNIT-of-N validation in Review.
   { workOrderNumber: "4571", customerName: "RCCL Coco Cay", description: "Royal Caribbean Coco Cay (2 bridges)", budgetedHours: 320, quantity: 2 },
   { workOrderNumber: "4602", customerName: "Marine Dock Co", description: "Aluminum gangway", budgetedHours: 120, quantity: 1 },
   { workOrderNumber: "4610", customerName: "Bayfront Marina", description: "Floating dock rails", budgetedHours: 80, quantity: 1 },

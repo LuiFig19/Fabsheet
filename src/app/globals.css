@@ -8,6 +8,8 @@
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
     --navy: 222 47% 16%;
     --navy-foreground: 210 40% 98%;
     --primary: 222 47% 16%;
@@ -24,6 +26,41 @@
     --input: 214 32% 86%;
     --ring: 222 47% 30%;
     --radius: 0.5rem;
+    /* Sidebar (always dark navy in light mode for that "premium app" feel) */
+    --sidebar: 213 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-border: 215 28% 20%;
+    --sidebar-hover: 215 28% 18%;
+    --sidebar-active: 215 28% 24%;
+    --sidebar-active-foreground: 210 40% 98%;
+  }
+
+  .dark {
+    --background: 222 47% 5%;
+    --foreground: 210 40% 96%;
+    --card: 222 47% 7%;
+    --card-foreground: 210 40% 96%;
+    --popover: 222 47% 7%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 210 40% 96%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 14%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 33% 12%;
+    --muted-foreground: 215 16% 65%;
+    --accent: 217 33% 16%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 16%;
+    --input: 217 33% 18%;
+    --ring: 215 16% 65%;
+    --sidebar: 222 47% 8%;
+    --sidebar-foreground: 210 40% 92%;
+    --sidebar-border: 217 33% 16%;
+    --sidebar-hover: 217 33% 14%;
+    --sidebar-active: 217 33% 18%;
+    --sidebar-active-foreground: 210 40% 98%;
   }
 }
 
@@ -31,7 +68,7 @@
   * {
     @apply border-border;
   }
-  body {
+  html, body {
     @apply bg-background text-foreground;
   }
 }
