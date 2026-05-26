@@ -1,8 +1,16 @@
 import { prisma } from "@/lib/db";
 import { decryptSecret, sha256 } from "@/lib/crypto";
-import { ClaudeVisionExtractor } from "./claude";
+import { ClaudeVisionExtractor, compressForVision } from "./claude";
 import { MockExtractor } from "./mock";
 import { extractedTimesheetSchema, type ExtractedTimesheet, type TimesheetExtractor } from "./types";
+
+const HARD_TIMEOUT_MS = 30_000;
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s. Try again, or contact support.`)), ms);
+    p.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
 
 export type { ExtractedTimesheet, ExtractedRow, ExtractedHeader, TimesheetExtractor } from "./types";
 
@@ -58,10 +66,13 @@ export type ExtractionOutcome = {
  *     AuditLog, and cache real results by hash.
  */
 export async function runExtraction(file: Buffer, mimeType: string, tenantId?: string): Promise<ExtractionOutcome> {
-  const hash = sha256(file);
+  // Compress phone photos to a Vision-friendly size BEFORE hashing — saves
+  // 3-8s per call and makes the cache key match what we actually send.
+  const compressed = await compressForVision(file, mimeType);
+  const hash = sha256(compressed.buffer);
   const usingMockEnv = (process.env.EXTRACTOR ?? "claude").toLowerCase() === "mock";
 
-  // 1. cache (keyed by content hash; shared safely, holds no tenant data)
+  // 1. cache (keyed by content hash of the compressed bytes)
   const cached = await prisma.ocrCache.findUnique({ where: { fileHash: hash } });
   if (cached) {
     const parsed = extractedTimesheetSchema.safeParse(cached.resultJson);
@@ -83,14 +94,14 @@ export async function runExtraction(file: Buffer, mimeType: string, tenantId?: s
         data: { tenantId, entityType: "Ocr", entityId: hash, action: "ocr_cap_block", after: { cap, callsToday } },
       });
       const mock = new MockExtractor();
-      const result = await mock.extract(file, mimeType);
+      const result = await mock.extract(compressed.buffer, compressed.mimeType);
       return { result, source: "mock", cappedFallback: true };
     }
   }
 
-  // 3. run
+  // 3. run with a hard 30s app-side timeout so the UI never hangs forever.
   const extractor = await getExtractor();
-  const result = await extractor.extract(file, mimeType);
+  const result = await withTimeout(extractor.extract(compressed.buffer, compressed.mimeType), HARD_TIMEOUT_MS, "Vision call");
 
   if (extractor.lastUsage) {
     const { inputTokens, outputTokens, model: usedModel } = extractor.lastUsage;

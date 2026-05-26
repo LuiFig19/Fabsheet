@@ -4,11 +4,20 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { runExtraction } from "@/lib/extractors";
-import { entriesFromExtraction, matchJobId } from "@/lib/mapping";
+import {
+  entriesFromExtraction,
+  matchJobId,
+  matchEmployee,
+  parseHeaderDate,
+  codeFromBubble,
+  validateUnit,
+} from "@/lib/mapping";
 import { computeDecimalHours } from "@/lib/utils";
-import { sha256 } from "@/lib/crypto";
 import { putUpload } from "@/lib/storage";
-import { getTenantContext, scopeWhere, scopeStamp, type TenantContext } from "@/lib/tenant";
+import { getTenantContext, scopeWhere, scopeStamp, tenantWhere, type TenantContext } from "@/lib/tenant";
+
+// maxDuration is set on the calling route (src/app/upload/page.tsx) because
+// "use server" files only allow async function exports.
 
 async function audit(ctx: TenantContext, entityType: string, entityId: string, action: string, after: unknown = {}) {
   await prisma.auditLog.create({
@@ -18,39 +27,27 @@ async function audit(ctx: TenantContext, entityType: string, entityId: string, a
 
 function revalidateAll() {
   revalidatePath("/");
+  revalidatePath("/dashboard");
   revalidatePath("/review");
   revalidatePath("/jobs");
   revalidatePath("/reports");
 }
 
-const uploadSchema = z.object({
-  employeeId: z.string().min(1, "Pick an employee."),
-  date: z.string().min(1, "Pick a date."),
-});
-
 export type UploadResult =
-  | { ok: true; uploadId: string; source: string; cappedFallback: boolean }
+  | { ok: true; uploadId: string; source: string; cappedFallback: boolean; detectedEmployee: string | null; detectedDate: string | null }
   | { ok: false; error: string; configure?: boolean };
 
 /**
- * Critical path. Store the file (R2 or disk), create the upload as "extracting",
- * run the orchestrated extractor (cache + cap + cost logging), persist rows in
- * needs_review with per-field confidence, attach jobs by work order, flip to
- * needs_review. Everything is stamped + scoped to the active tenant/division.
+ * Critical path. V5: the manager does NOT pick the employee or date — the OCR
+ * reads them from the header and we fuzzy-match the employee + parse the date.
+ * If either can't be determined the upload still saves and the Review screen
+ * banner asks for it.
+ *
+ * Stamps tenant/division on everything; passes job context into mapping so
+ * customer + labor code are DERIVED, not extracted.
  */
 export async function uploadAndExtract(formData: FormData): Promise<UploadResult> {
   const ctx = await getTenantContext();
-  const parsed = uploadSchema.safeParse({
-    employeeId: formData.get("employeeId"),
-    date: formData.get("date"),
-  });
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-
-  // Employee must belong to this tenant/division.
-  const employee = await prisma.employee.findFirst({
-    where: { id: parsed.data.employeeId, ...scopeWhere(ctx) },
-  });
-  if (!employee) return { ok: false, error: "Unknown employee for this company." };
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
@@ -60,21 +57,19 @@ export async function uploadAndExtract(formData: FormData): Promise<UploadResult
   if (!okType) return { ok: false, error: "Only image or PDF files are supported." };
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const hash = sha256(buffer);
 
+  // Create the upload row in "extracting" so the Review queue shows it
+  // immediately (and won't be lost if extraction throws).
   const upload = await prisma.timesheetUpload.create({
     data: {
       ...scopeStamp(ctx),
-      filePath: "", // set after storage
-      fileHash: hash,
+      filePath: "",
       mimeType: file.type,
-      employeeId: employee.id,
-      date: new Date(parsed.data.date),
+      date: new Date(), // placeholder; overwritten below from the OCR header or override
       status: "extracting",
     },
   });
 
-  // Store the image (R2 in prod, disk in dev). Key is derived from upload id.
   const obj = await putUpload(ctx.tenant.slug, upload.id, file.name, buffer, file.type);
   await prisma.timesheetUpload.update({
     where: { id: upload.id },
@@ -83,8 +78,26 @@ export async function uploadAndExtract(formData: FormData): Promise<UploadResult
 
   try {
     const { result, source, cappedFallback } = await runExtraction(buffer, file.type, ctx.tenant.id);
-    const drafts = entriesFromExtraction(result);
-    const jobs = await prisma.job.findMany({ where: scopeWhere(ctx), select: { id: true, workOrderNumber: true } });
+
+    // Fuzzy-match employee + parse date from the OCR header.
+    const [employees, jobs] = await Promise.all([
+      prisma.employee.findMany({ where: scopeWhere(ctx) }),
+      prisma.job.findMany({ where: scopeWhere(ctx), select: { id: true, workOrderNumber: true, customerName: true, quantity: true } }),
+    ]);
+    const matchedEmployee = matchEmployee(result.header.employeeName.value, employees);
+    const parsedDate = parseHeaderDate(result.header.date.value);
+
+    // Convert OCR rows into entry drafts with derived customer + code +
+    // per-row warnings (UNIT validation, job-not-found, etc).
+    const { drafts } = entriesFromExtraction({
+      ex: result,
+      jobs: jobs.map((j) => ({ id: j.id, workOrderNumber: j.workOrderNumber, customerName: j.customerName, quantity: j.quantity })),
+    });
+
+    const headerWarnings: string[] = [];
+    if (!matchedEmployee) headerWarnings.push(`Could not auto-pick employee from header ("${result.header.employeeName.value || "blank"}"). Pick one above.`);
+    if (!parsedDate) headerWarnings.push("Could not read the date. Pick one above.");
+    const allWarnings = [...headerWarnings, ...result.warnings];
 
     await prisma.$transaction([
       ...drafts.map((d) =>
@@ -92,17 +105,19 @@ export async function uploadAndExtract(formData: FormData): Promise<UploadResult
           data: {
             ...scopeStamp(ctx),
             uploadId: upload.id,
-            employeeId: employee.id,
+            employeeId: matchedEmployee?.id ?? null,
             jobId: matchJobId(d.workOrderNumber, jobs),
             workOrderNumber: d.workOrderNumber,
             customerName: d.customerName,
-            partId: d.partId,
+            unitNumber: d.unitNumber ?? null,
+            unitTotal: d.unitTotal ?? null,
             description: d.description,
             laborCode: d.laborCode,
             startTime: d.startTime,
             endTime: d.endTime,
             decimalHours: d.decimalHours,
-            confidenceByField: d.confidenceByField,
+            notes: d.notes,
+            confidenceByField: { ...d.confidenceByField, _rowWarnings: d.warnings.length },
             status: "needs_review",
           },
         }),
@@ -113,16 +128,46 @@ export async function uploadAndExtract(formData: FormData): Promise<UploadResult
           status: "needs_review",
           extractorName: source,
           rawExtractedJson: result as object,
-          warnings: result.warnings,
-          shiftStart: result.header.shiftStart.value,
-          shiftEnd: result.header.shiftEnd.value,
+          warnings: allWarnings,
+          employeeId: matchedEmployee?.id ?? null,
+          date: parsedDate ?? upload.date,
+          // V5 has no shift fields. Use earliest start + latest end as a snapshot.
+          shiftStart: drafts.length > 0 ? (drafts[0]?.startTime ?? "") : "",
+          shiftEnd: drafts.length > 0 ? (drafts[drafts.length - 1]?.endTime ?? "") : "",
         },
       }),
     ]);
 
+    // Save row-level warnings out of confidenceByField into a more useful place
+    // (they're already on the entry record under _rowWarnings, but we also need
+    // the actual strings on the row for the Review UI to render).
+    await Promise.all(
+      drafts.map(async (d, i) => {
+        if (d.warnings.length === 0) return;
+        const entry = await prisma.timesheetEntry.findFirst({
+          where: { uploadId: upload.id, workOrderNumber: d.workOrderNumber, startTime: d.startTime },
+          orderBy: { createdAt: "asc" },
+          skip: 0,
+        });
+        if (!entry) return;
+        const cby = (entry.confidenceByField as Record<string, unknown> | null) ?? {};
+        await prisma.timesheetEntry.update({
+          where: { id: entry.id },
+          data: { confidenceByField: { ...cby, _warnings: d.warnings } },
+        });
+      }),
+    );
+
     await audit(ctx, "TimesheetUpload", upload.id, "create", { source, rows: drafts.length });
     revalidateAll();
-    return { ok: true, uploadId: upload.id, source, cappedFallback };
+    return {
+      ok: true,
+      uploadId: upload.id,
+      source,
+      cappedFallback,
+      detectedEmployee: matchedEmployee?.name ?? null,
+      detectedDate: parsedDate ? parsedDate.toISOString().slice(0, 10) : null,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Extraction failed.";
     await prisma.timesheetUpload.update({
@@ -137,14 +182,13 @@ export async function uploadAndExtract(formData: FormData): Promise<UploadResult
 const fieldSchema = z.object({
   entryId: z.string().min(1),
   workOrderNumber: z.string().optional(),
-  customerName: z.string().optional(),
-  partId: z.string().optional(),
+  unitNumber: z.string().optional(),
+  unitTotal: z.string().optional(),
   description: z.string().optional(),
-  laborCode: z.string().optional(),
   startTime: z.string().optional(),
   endTime: z.string().optional(),
   notes: z.string().optional(),
-  decimalHours: z.string().optional(), // manual override when present
+  decimalHours: z.string().optional(),
 });
 
 export async function updateEntry(formData: FormData) {
@@ -153,16 +197,30 @@ export async function updateEntry(formData: FormData) {
   if (!parsed.success) return;
   const { entryId, decimalHours, ...fields } = parsed.data;
 
-  // Scope: entry must belong to this tenant/division.
   const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, ...scopeWhere(ctx) } });
   if (!existing) return;
 
   const data: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(fields)) if (v !== undefined) data[k] = v;
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === undefined) continue;
+    if (k === "unitNumber" || k === "unitTotal") {
+      data[k] = v === "" ? null : Number.parseInt(v, 10) || null;
+    } else {
+      data[k] = v;
+    }
+  }
 
+  // Re-match job if work order changed; re-derive customer + code from new job
+  // and current description.
   if (typeof data.workOrderNumber === "string") {
-    const jobs = await prisma.job.findMany({ where: scopeWhere(ctx), select: { id: true, workOrderNumber: true } });
-    data.jobId = matchJobId(data.workOrderNumber, jobs);
+    const jobs = await prisma.job.findMany({ where: scopeWhere(ctx), select: { id: true, workOrderNumber: true, customerName: true } });
+    const m = jobs.find((j) => j.workOrderNumber === (data.workOrderNumber as string).trim());
+    data.jobId = m?.id ?? null;
+    data.customerName = m?.customerName ?? "";
+  }
+  // If description (bubble) changed, re-derive labor code.
+  if (typeof data.description === "string") {
+    data.laborCode = codeFromBubble(data.description as string, null) || existing.laborCode;
   }
 
   if (decimalHours !== undefined && decimalHours !== "") {
@@ -180,6 +238,38 @@ export async function updateEntry(formData: FormData) {
   await prisma.timesheetEntry.update({ where: { id: entryId }, data });
   await audit(ctx, "TimesheetEntry", entryId, "edit", data);
   revalidateAll();
+}
+
+/** Manager overrides the auto-detected employee or date on the upload itself. */
+export async function updateUploadHeader(formData: FormData) {
+  const ctx = await getTenantContext();
+  const uploadId = String(formData.get("uploadId") ?? "");
+  const upload = await prisma.timesheetUpload.findFirst({ where: { id: uploadId, ...scopeWhere(ctx) } });
+  if (!upload) return;
+
+  const data: Record<string, unknown> = {};
+  const employeeId = formData.get("employeeId");
+  if (typeof employeeId === "string") {
+    if (employeeId === "") data.employeeId = null;
+    else {
+      const e = await prisma.employee.findFirst({ where: { id: employeeId, ...tenantWhere(ctx) } });
+      if (e) {
+        data.employeeId = e.id;
+        // Propagate to all entries on this upload so reports group correctly.
+        await prisma.timesheetEntry.updateMany({ where: { uploadId, ...tenantWhere(ctx) }, data: { employeeId: e.id } });
+      }
+    }
+  }
+  const date = formData.get("date");
+  if (typeof date === "string" && date) {
+    const d = parseHeaderDate(date) ?? new Date(date);
+    if (!Number.isNaN(d.getTime())) data.date = d;
+  }
+  if (Object.keys(data).length > 0) {
+    await prisma.timesheetUpload.update({ where: { id: uploadId }, data });
+    await audit(ctx, "TimesheetUpload", uploadId, "edit_header", data);
+    revalidateAll();
+  }
 }
 
 export async function approveEntry(entryId: string) {

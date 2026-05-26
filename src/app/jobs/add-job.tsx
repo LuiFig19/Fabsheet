@@ -59,6 +59,10 @@ export function AddJob() {
             <Input name="description" placeholder="Aluminum gangway" />
           </label>
           <label className="block space-y-1">
+            <span className="text-sm font-medium">How many units? (e.g. 2 for a job with 2 bridges)</span>
+            <Input name="quantity" type="number" step="1" min="1" defaultValue="1" required />
+          </label>
+          <label className="block space-y-1">
             <span className="text-sm font-medium">Budgeted hours</span>
             <Input name="budgetedHours" type="number" step="1" min="0" placeholder="120" />
           </label>

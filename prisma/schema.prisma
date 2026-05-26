@@ -118,9 +118,11 @@ model Job {
   divisionId      String?
   workOrderNumber String // "4354"
   customerName    String           @default("")
-  partId          String           @default("")
   description     String           @default("")
   budgetedHours   Float            @default(0)
+  // How many physical deliverables on this job (e.g. 2 bridges).
+  // Drives the UNIT __ of __ validation on incoming timesheets.
+  quantity        Int              @default(1)
   status          String           @default("active") // active | complete | on_hold
   notes           String           @default("")
   createdAt       DateTime         @default(now())
@@ -167,10 +169,11 @@ model TimesheetEntry {
   jobId             String?
   job               Job?            @relation(fields: [jobId], references: [id])
   workOrderNumber   String          @default("")
-  customerName      String          @default("")
-  partId            String          @default("")
-  description       String          @default("")
-  laborCode         String          @default("")
+  customerName      String          @default("") // snapshot from Job at OCR time; UI shows live Job.customerName
+  unitNumber        Int?
+  unitTotal         Int?
+  description       String          @default("") // bubble selection (Frame, Decking, Rails, Rework, Forklift, etc.) or "Other"
+  laborCode         String          @default("") // derived from description via TASK_TO_CODE; never user-entered now
   startTime         String          @default("") // HH:MM
   endTime           String          @default("")
   decimalHours      Float           @default(0)

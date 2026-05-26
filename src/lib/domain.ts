@@ -58,11 +58,13 @@ export const JOBS: {
   customerName: string;
   description: string;
   budgetedHours: number;
+  quantity: number;
   status?: string;
 }[] = [
-  { workOrderNumber: "4354", customerName: "RCCL RB1", description: "Royal Caribbean RB1", budgetedHours: 400 },
-  { workOrderNumber: "4571", customerName: "RCCL Coco Cay", description: "Royal Caribbean Coco Cay", budgetedHours: 320 },
-  { workOrderNumber: "4602", customerName: "Marine Dock Co", description: "Aluminum gangway", budgetedHours: 120 },
-  { workOrderNumber: "4610", customerName: "Bayfront Marina", description: "Floating dock rails", budgetedHours: 80 },
-  { workOrderNumber: "4625", customerName: "Port Everglades", description: "Tread plate stairs", budgetedHours: 60 },
+  { workOrderNumber: "4354", customerName: "RCCL RB1", description: "Royal Caribbean RB1", budgetedHours: 400, quantity: 1 },
+  // Coco Cay has 2 bridges — exercises the UNIT-of-N validation in Review.
+  { workOrderNumber: "4571", customerName: "RCCL Coco Cay", description: "Royal Caribbean Coco Cay (2 bridges)", budgetedHours: 320, quantity: 2 },
+  { workOrderNumber: "4602", customerName: "Marine Dock Co", description: "Aluminum gangway", budgetedHours: 120, quantity: 1 },
+  { workOrderNumber: "4610", customerName: "Bayfront Marina", description: "Floating dock rails", budgetedHours: 80, quantity: 1 },
+  { workOrderNumber: "4625", customerName: "Port Everglades", description: "Tread plate stairs", budgetedHours: 60, quantity: 1 },
 ];

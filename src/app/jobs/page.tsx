@@ -45,6 +45,7 @@ export default async function JobsPage() {
                 <TableHead>WO #</TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Description</TableHead>
+                <TableHead className="text-right">Units</TableHead>
                 <TableHead className="text-right">Budgeted</TableHead>
                 <TableHead className="text-right">Used</TableHead>
                 <TableHead className="text-right">Remaining</TableHead>
@@ -65,6 +66,7 @@ export default async function JobsPage() {
                     </TableCell>
                     <TableCell>{j.customerName || "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{j.description || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{j.quantity}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtHours(j.budgetedHours)}</TableCell>
                     <TableCell className={`text-right font-medium tabular-nums ${TIER_TEXT[tier]}`}>{fmtHours(used)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtHours(remaining)}</TableCell>

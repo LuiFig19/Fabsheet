@@ -9,6 +9,7 @@ const jobSchema = z.object({
   workOrderNumber: z.string().min(1, "Work order number is required."),
   customerName: z.string().optional(),
   description: z.string().optional(),
+  quantity: z.coerce.number().int().min(1).optional(),
   budgetedHours: z.coerce.number().min(0).optional(),
   notes: z.string().optional(),
 });
@@ -23,6 +24,7 @@ export async function createJob(formData: FormData) {
       workOrderNumber: parsed.data.workOrderNumber,
       customerName: parsed.data.customerName ?? "",
       description: parsed.data.description ?? "",
+      quantity: parsed.data.quantity ?? 1,
       budgetedHours: parsed.data.budgetedHours ?? 0,
       notes: parsed.data.notes ?? "",
     },
@@ -30,6 +32,16 @@ export async function createJob(formData: FormData) {
   revalidatePath("/jobs");
   revalidatePath("/");
   return { ok: true };
+}
+
+export async function updateJobQuantity(jobId: string, quantity: number) {
+  const ctx = await getTenantContext();
+  await prisma.job.updateMany({
+    where: { id: jobId, ...scopeWhere(ctx) },
+    data: { quantity: Math.max(1, Math.round(quantity)) },
+  });
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/jobs");
 }
 
 export async function updateJobBudget(jobId: string, budgetedHours: number) {

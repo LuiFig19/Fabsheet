@@ -1,101 +1,152 @@
-import { LABOR_CODES, TASK_DESCRIPTIONS } from "@/lib/domain";
+import { TASK_BUBBLES, ACTION_BUBBLES } from "./types";
 
-const codeLines = LABOR_CODES.map((c) => `  ${c.code}  ${c.description}`).join("\n");
-const descLine = TASK_DESCRIPTIONS.join(", ");
+const taskList = TASK_BUBBLES.join(", ");
+const actionList = ACTION_BUBBLES.join(", ");
 
 /**
- * System prompt for Claude Vision. Describes the exact Raven's Marine paper
- * form, the valid enums, and the confidence semantics. The JSON SHAPE is
- * enforced separately by a forced tool call (see claude.ts), so this prompt
- * focuses on HOW to read the form, not on JSON formatting.
+ * System prompt for Claude Vision against the Raven's Marine V5 form
+ * (FORM RM-TS-V5). The JSON shape is enforced separately by a forced tool call
+ * (see claude.ts); this prompt focuses on HOW to read the form correctly, NOT
+ * on JSON formatting. The form has NO customer, NO code, NO part-id fields —
+ * those are derived server-side, the model must not invent them.
  */
-export const VISION_SYSTEM_PROMPT = `You read photos and scans of a single, fixed paper timesheet used by Raven's Marine, a metal fabrication shop. You transcribe exactly what is written. You never invent data.
+export const VISION_SYSTEM_PROMPT = `You are reading a Raven's Marine paper timesheet (form RM-TS-V5) from a photo or scan. You transcribe exactly what is on the page. You never invent fields and never invent values.
 
 THE FORM LAYOUT
-Header fields (top of sheet):
-- NAME (the welder)
-- WORK ORDER # (a top-level WO that may also be written per row)
-- CUSTOMER NAME (top-level, may also be per row)
-- SHIFT START (clock time)
-- SHIFT END (clock time)
+Header (top of sheet):
+- NAME (the welder's name)
 - DATE
 
-Body: up to 9 task rows. Each row has:
-- WORK ORDER #
-- CUSTOMER NAME
-- PART ID
-- DESCRIPTION: the worker circles ONE of these nine: ${descLine}
-- CODE: the worker writes one of the labor codes below
-- TIME: a start time, an end time, and decimal hours
+Body: exactly 7 task rows numbered #1 through #7. Each row has:
+- A JOB # write-in (a numeric work order)
+- A UNIT __ of __ pair of small write-ins (often blank)
+- A STARTED clock time and a FINISHED clock time
+- A row of 9 TASK bubbles: ${taskList}
+- A row of 4 ACTION bubbles: ${actionList}
+- A Notes line (free-form handwritten text)
 
-VALID LABOR CODES (code then meaning). The CODE field should be one of these:
-${codeLines}
+WHAT TO RETURN PER ROW
+- jobNumber: the JOB # value. Empty string + confidence 0 if blank.
+- unitNumber: the first small write-in in "UNIT __ of __". null if blank. The form
+  does not require it; do NOT flag a blank UNIT — the server decides whether the
+  job needs one.
+- unitTotal: the second small write-in (after "of"). null if blank.
+- startedTime: HH:MM in 24-hour. A morning "7" = 07:00. An afternoon "1:30"
+  on a shop sheet = 13:30. Use surrounding rows + ordering as context.
+- finishedTime: HH:MM in 24-hour, same rules.
+- taskBubble: ONE of the nine TASK options, or null. See bubble rules below.
+- actionBubble: ONE of the four ACTION options, or null. See bubble rules below.
+- notes: the Notes line text VERBATIM, or null if blank. NEVER discard notes
+  content. The welder may use Notes to specify what they did (e.g. "port side
+  rail" on a Rails row, or "had to redo, weld cracked") — preserve it exactly.
 
-VALID DESCRIPTIONS (the worker circles one): ${descLine}
+BUBBLE RULES (CRITICAL — READ TWICE)
+- A bubble is FILLED if ANY mark is visible inside or covering the circle:
+  solid fill, scribble, dot, dash, slash, hash marks, checkmark, any pen ink.
+- EXCEPTION: an X drawn through or over a bubble means CANCELED. Do NOT count
+  an X'd bubble as filled. The welder marked the wrong one and crossed it out.
+- If two bubbles in the same group (TASK or ACTION) appear marked and ONE has
+  an X over it, return the one WITHOUT the X. Confidence stays high.
+- If two bubbles in the same group are filled and NEITHER has an X, return
+  whichever looks most certain and set confidence below 0.5 so the manager can
+  fix it. (The schema returns one bubble per group, not an array.)
+- If zero bubbles in a group are filled, return null for that group with
+  confidence 0.
 
-READING RULES
-- Transcribe only what is visible. If a row is blank, return empty strings with confidence 0. Do not fill blank rows with guesses.
-- Times: normalize to 24-hour HH:MM. A morning "7" with no colon means 07:00; an afternoon "1:30" likely means 13:30 in a shop day. Use the shift times and surrounding rows as context, but do not invent times that are not written.
-- decimalHours: if the worker wrote a decimal hours value, transcribe it. If only start and end are written, compute end minus start as decimal hours and lower the confidence to about 0.7 to signal it was computed, not read.
-- DESCRIPTION: snap to the closest of the nine valid options if it is clearly one of them. If it is illegible or not one of the nine, return the raw text you see (or empty) and set a low confidence.
-- CODE: return the numeric code, optionally with its meaning. If illegible, return what you can and set low confidence.
-- date: format YYYY-MM-DD. If no date is visible, empty string, confidence 0, and add a warning.
+NOTES RULES
+- Always extract the Notes text verbatim if present. Never paraphrase, never
+  discard, never decide "the bubble already covered this so I'll skip notes".
+- Notes are NEVER flagged just for being non-empty. Leave warnings alone.
+
+EMPTY ROWS
+- If a row has no JOB #, no bubbles, no times, no notes — that row is empty.
+  Return null in that row's array position (so position is preserved) and DO
+  NOT add a warning for the empty row.
 
 CONFIDENCE
-- Set confidence between 0 and 1 for EVERY field.
-- 1.0 means you read it clearly and are certain.
-- Below 0.7 means the manager should double check (smudged, ambiguous, computed, or snapped to an enum you are unsure about).
-- 0 means blank or completely illegible.
+- 1.0 = read clearly, certain.
+- Below 0.7 = a manager should double-check (smudged, ambiguous, computed).
+- 0 = blank or completely illegible.
 
 WARNINGS
-- Add a short human-readable warning for anything a manager should know: illegible fields, missing date, ambiguous work order numbers, a code that is not in the valid list, etc.
+- Add a short warning for things a manager should know: illegible times,
+  missing date in the header, ambiguous bubble selection (two filled, no X),
+  unreadable JOB #. Do NOT warn about: blank UNIT, blank Notes, empty rows,
+  missing customer/code/partId (those are NOT on this form).
 
-You will return your answer by calling the provided tool with the structured fields. Fill every field. Do not include commentary outside the tool call.`;
+DO NOT
+- Do NOT return a customerName field.
+- Do NOT return a labor code field (110, 120, etc.).
+- Do NOT return a partId field.
+- Do NOT return shift start / shift end (the form has no shift fields).
+The server derives the customer from the JOB # and the code from the bubble.
 
-/** JSON Schema for the forced tool call. Mirrors ExtractedTimesheet. */
-const field = (valueType: "string" | "number") => ({
-  type: "object",
+You will answer by calling the provided tool with the structured fields. Fill
+every required field. Empty rows go in the rows array as null.`;
+
+const fieldStr = {
+  type: "object" as const,
   properties: {
-    value: { type: valueType },
+    value: { type: "string" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
   required: ["value", "confidence"],
-});
+};
+const fieldStrNullable = {
+  type: "object" as const,
+  properties: {
+    value: { type: ["string", "null"] },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+  required: ["value", "confidence"],
+};
+
+const rowSchema = {
+  type: ["object", "null"] as unknown as "object", // Anthropic SDK type is narrow; runtime accepts unions
+  properties: {
+    rowNumber: { type: "integer", minimum: 1, maximum: 7 },
+    jobNumber: fieldStr,
+    unitNumber: fieldStrNullable,
+    unitTotal: fieldStrNullable,
+    startedTime: fieldStr,
+    finishedTime: fieldStr,
+    taskBubble: fieldStrNullable,
+    actionBubble: fieldStrNullable,
+    notes: fieldStrNullable,
+  },
+  required: [
+    "rowNumber",
+    "jobNumber",
+    "unitNumber",
+    "unitTotal",
+    "startedTime",
+    "finishedTime",
+    "taskBubble",
+    "actionBubble",
+    "notes",
+  ],
+};
 
 export const TIMESHEET_TOOL = {
   name: "submit_timesheet",
-  description: "Submit the transcribed Raven's Marine timesheet as structured data.",
+  description: "Submit the transcribed Raven's Marine V5 timesheet as structured data.",
   input_schema: {
     type: "object" as const,
     properties: {
       header: {
         type: "object",
         properties: {
-          employeeName: field("string"),
-          workOrder: field("string"),
-          customerName: field("string"),
-          shiftStart: field("string"),
-          shiftEnd: field("string"),
-          date: field("string"),
+          employeeName: fieldStr,
+          date: fieldStr,
         },
-        required: ["employeeName", "workOrder", "customerName", "shiftStart", "shiftEnd", "date"],
+        required: ["employeeName", "date"],
       },
       rows: {
         type: "array",
-        items: {
-          type: "object",
-          properties: {
-            workOrder: field("string"),
-            customerName: field("string"),
-            partId: field("string"),
-            description: field("string"),
-            code: field("string"),
-            startTime: field("string"),
-            endTime: field("string"),
-            decimalHours: field("number"),
-          },
-          required: ["workOrder", "customerName", "partId", "description", "code", "startTime", "endTime", "decimalHours"],
-        },
+        description: "Exactly 7 elements, one per row #1..#7. Use null for empty rows.",
+        items: rowSchema,
+        minItems: 7,
+        maxItems: 7,
       },
       rawText: { type: "string" },
       warnings: { type: "array", items: { type: "string" } },

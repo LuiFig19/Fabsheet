@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import sharp from "sharp";
 import {
   extractedTimesheetSchema,
   type ExtractedTimesheet,
@@ -10,20 +11,43 @@ import { VISION_SYSTEM_PROMPT, TIMESHEET_TOOL } from "./claudeVisionPrompt";
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 function normalizeMime(mimeType: string): string {
-  if (mimeType === "image/jpg") return "image/jpeg";
-  return mimeType;
+  return mimeType === "image/jpg" ? "image/jpeg" : mimeType;
 }
 
 /**
- * Production OCR. Calls Anthropic's vision API with the form structure and
- * valid enums in the system prompt, and FORCES a tool call so the response is
- * always structurally valid JSON. The result is then validated with Zod; on
- * failure it retries once with the error fed back, then gives up with a clear
- * error so the upload action can offer "try again or enter manually".
+ * Compress an uploaded image before sending to Claude Vision. Vision's useful
+ * resolution caps around 1568px on the long edge — bigger images add seconds
+ * of upload + processing without improving accuracy on handwriting. A typical
+ * 4000x3000 phone photo (~5 MB) becomes ~250 KB at quality 85.
  *
- * Note on PDFs: rather than rasterizing page 1 locally (native canvas/gm deps,
- * fragile on Windows), PDFs are sent to Claude as a native document block.
- * Claude reads multi-page PDFs directly. Images are sent as image blocks.
+ * PDFs and unknown types pass through untouched.
+ */
+export async function compressForVision(buffer: Buffer, mimeType: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  const mt = normalizeMime(mimeType);
+  if (!IMAGE_TYPES.has(mt) && mt !== "image/jpg") return { buffer, mimeType };
+  try {
+    const out = await sharp(buffer)
+      .rotate() // honor EXIF orientation so portraits don't come in sideways
+      .resize(1568, 1568, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    return { buffer: out, mimeType: "image/jpeg" };
+  } catch {
+    // If sharp can't decode it (rare HEIC etc), send the original and let Claude try.
+    return { buffer, mimeType: mt };
+  }
+}
+
+/**
+ * Production OCR for the V5 form. Calls Anthropic's vision API with the form
+ * structure in the system prompt, FORCES a tool call so the response is
+ * always structurally valid JSON, validates with Zod, retries once with the
+ * error fed back, and gives up with a clear error if the model still can't
+ * comply.
+ *
+ * PDFs are sent as a native document block (Claude reads PDFs directly — no
+ * local rasterization). Images are sent as image blocks. All images are
+ * pre-compressed by compressForVision().
  */
 export class ClaudeVisionExtractor implements TimesheetExtractor {
   readonly name = "claude";
@@ -40,25 +64,15 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
     this.model = model;
   }
 
-  // Return type kept loose: the content-block param union and PDF "document"
-  // support vary across Anthropic SDK minor versions. The wire shapes below are
-  // what the API expects; the SDK passes them through.
   private buildSource(file: Buffer, mimeType: string): Record<string, unknown> {
     const mt = normalizeMime(mimeType);
     const data = file.toString("base64");
     if (mt === "application/pdf") {
-      return {
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data },
-      };
+      return { type: "document", source: { type: "base64", media_type: "application/pdf", data } };
     }
     if (IMAGE_TYPES.has(mt)) {
-      return {
-        type: "image",
-        source: { type: "base64", media_type: mt as "image/jpeg", data },
-      };
+      return { type: "image", source: { type: "base64", media_type: mt as "image/jpeg", data } };
     }
-    // Default to JPEG if the browser sent an odd type for a photo.
     return { type: "image", source: { type: "base64", media_type: "image/jpeg", data } };
   }
 
@@ -69,7 +83,7 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
       source,
       {
         type: "text",
-        text: "Transcribe this Raven's Marine timesheet. Call submit_timesheet with every field filled and a confidence on each.",
+        text: "Read this Raven's Marine V5 timesheet. Call submit_timesheet with all 7 row slots (use null for blank rows) and a confidence on every field.",
       },
     ] as unknown as Anthropic.MessageParam["content"];
 
@@ -82,7 +96,7 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
       if (attempt > 0) {
         messages.push({
           role: "user",
-          content: `Your previous tool input failed validation: ${lastError}. Call submit_timesheet again with corrected, schema-valid values.`,
+          content: `Your previous tool input failed validation: ${lastError}. Call submit_timesheet again with corrected, schema-valid values. Remember the rows array must have exactly 7 entries (null for blank rows).`,
         });
       }
 
@@ -99,9 +113,7 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
       outputTokens += resp.usage.output_tokens;
       this.lastUsage = { inputTokens, outputTokens, model: this.model };
 
-      const toolUse = resp.content.find(
-        (b) => b.type === "tool_use" && b.name === TIMESHEET_TOOL.name,
-      );
+      const toolUse = resp.content.find((b) => b.type === "tool_use" && b.name === TIMESHEET_TOOL.name);
       if (!toolUse || toolUse.type !== "tool_use") {
         lastError = "Model did not return a submit_timesheet tool call.";
         continue;
@@ -112,6 +124,6 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
       lastError = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     }
 
-    throw new Error(`Claude Vision returned data that did not match the timesheet schema after a retry. ${lastError}`);
+    throw new Error(`Claude Vision returned data that did not match the V5 schema after a retry. ${lastError}`);
   }
 }

@@ -7,7 +7,7 @@ export type ReportRow = {
   employee: string;
   workOrder: string;
   customer: string;
-  partId: string;
+  unit: string; // "1/2" or ""
   description: string;
   code: string;
   hours: number;
@@ -55,8 +55,10 @@ export async function buildReport(
     date: iso(e.upload.date),
     employee: e.employee?.name ?? "Unknown",
     workOrder: e.workOrderNumber,
-    customer: e.customerName || e.job?.customerName || "",
-    partId: e.partId,
+    // Always prefer the live Job.customerName (the snapshot on the entry can
+    // be stale if the job's customer was renamed later).
+    customer: e.job?.customerName || e.customerName || "",
+    unit: e.unitNumber != null ? `${e.unitNumber}${e.unitTotal != null ? `/${e.unitTotal}` : ""}` : "",
     description: e.description,
     code: e.laborCode,
     hours: e.decimalHours,
@@ -97,18 +99,18 @@ export async function buildReport(
   };
 }
 
-/** Flat CSV per spec: Date, Employee, Work Order, Customer, Part ID, Description, Code, Decimal Hours, Notes, Approved. */
+/** Flat CSV: Date, Employee, Work Order, Customer, Unit, Description, Code, Decimal Hours, Notes, Approved. */
 export function reportToCsv(data: ReportData): string {
   const cell = (v: string | number) => {
     const s = String(v ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = ["Date", "Employee", "Work Order", "Customer", "Part ID", "Description", "Code", "Decimal Hours", "Notes", "Approved"];
+  const header = ["Date", "Employee", "Work Order", "Customer", "Unit", "Description", "Code", "Decimal Hours", "Notes", "Approved"];
   const lines = [header.join(",")];
   for (const g of data.groups) {
     for (const r of g.rows) {
       lines.push(
-        [r.date, r.employee, r.workOrder, r.customer, r.partId, r.description, r.code, r.hours.toFixed(2), r.notes, "Yes"]
+        [r.date, r.employee, r.workOrder, r.customer, r.unit, r.description, r.code, r.hours.toFixed(2), r.notes, "Yes"]
           .map(cell)
           .join(","),
       );
