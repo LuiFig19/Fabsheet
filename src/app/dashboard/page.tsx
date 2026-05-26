@@ -6,7 +6,14 @@ import { Progress } from "@/components/ui/progress";
 import { prisma } from "@/lib/db";
 import { approvedHoursByJob } from "@/lib/queries";
 import { getTenantContext, scopeWhere, tenantWhere } from "@/lib/tenant";
-import { budgetTier, fmtHours, formatDate, workWeekProgress } from "@/lib/utils";
+import {
+  budgetTier,
+  fmtHours,
+  formatDate,
+  workWeekProgress,
+  productiveCodeWhere,
+  nonProductiveCodeWhere,
+} from "@/lib/utils";
 import { Upload, ClipboardCheck, AlertTriangle, ArrowRight, Target } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -19,15 +26,14 @@ export default async function DashboardPage() {
   const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company] = await Promise.all([
     prisma.job.findMany({ where: { ...s, status: "active" }, orderBy: { workOrderNumber: "asc" } }),
     approvedHoursByJob(ctx),
-    // Productive = labor codes 1xx (Weld/Fab, Cut, Decking, Floats, Bumper,
-    // Helping Welder, Special Projects, Fit-Up/Install).
+    // Productive = direct fab work (see PRODUCTIVE_CODES in lib/utils).
     prisma.timesheetEntry.aggregate({
-      where: { ...s, status: "approved", laborCode: { startsWith: "1" }, upload: { date: { gte: weekStart, lt: weekEnd } } },
+      where: { ...s, status: "approved", upload: { date: { gte: weekStart, lt: weekEnd } }, ...productiveCodeWhere },
       _sum: { decimalHours: true },
     }),
-    // Non-production = anything else (2xx machine repair, forklift, wash, admin, etc.).
+    // Non-production = everything else (machine repair, forklift, wash, admin, etc).
     prisma.timesheetEntry.aggregate({
-      where: { ...s, status: "approved", NOT: { laborCode: { startsWith: "1" } }, upload: { date: { gte: weekStart, lt: weekEnd } } },
+      where: { ...s, status: "approved", upload: { date: { gte: weekStart, lt: weekEnd } }, ...nonProductiveCodeWhere },
       _sum: { decimalHours: true },
     }),
     prisma.job.count({ where: { ...s, status: "active" } }),

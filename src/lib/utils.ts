@@ -31,21 +31,37 @@ export function fmtHours(h: number): string {
 
 /**
  * Classify a Raven's labor code as production-hours (true) vs. overhead/support
- * (false). The 1xx series is direct fabrication work (Weld/Fab, Cut, Decking,
- * Floats, Bumper, Helping Welder, Special Projects, Fit-Up/Install). The 2xx
- * series is non-production support time (Shipping Prep, Wash, Load/Unload,
- * Welding Machine Repair, Admin, Maintenance, Inventory). Anything else
- * (blank, "999 Other") counts as non-productive.
+ * (false). Production codes are direct fabrication work; everything else is
+ * non-production support time. Codes that don't match are non-productive
+ * (blank, "999 Other", unknown). Entries store the code as a string like
+ * "110 Weld/Fab", so we read the first run of digits.
  *
- * Entries store the labor code as a string like "110 Weld/Fab", so we read the
- * first run of digits.
+ * Productive (counts toward the weekly target):
+ *   110 Weld/Fab, 120 Cut, 125 Cut for Stock, 130 Repair/Reworking,
+ *   140 Labor Decking, 150 Floats, 160 Bumper, 170 Helping Welder,
+ *   180 Special Projects, 280 Fit-Up/Install.
+ * Non-productive:
+ *   210 Shipping Prep, 220 Wash, 230 Load/Unload (forklift),
+ *   240 Welding Machine Repair, 250 Admin, 260 Maintenance, 270 Inventory.
  */
+const PRODUCTIVE_CODES = new Set([
+  "110", "120", "125", "130", "140", "150", "160", "170", "180", "280",
+]);
+
 export function isProductiveCode(laborCode: string | null | undefined): boolean {
   if (!laborCode) return false;
   const m = /^\s*(\d+)/.exec(laborCode);
   if (!m) return false;
-  return m[1].startsWith("1");
+  return PRODUCTIVE_CODES.has(m[1]);
 }
+
+/** Prisma `where` fragment that matches productive laborCode strings. */
+export const productiveCodeWhere = {
+  OR: Array.from(PRODUCTIVE_CODES).map((c) => ({ laborCode: { startsWith: c } })),
+};
+export const nonProductiveCodeWhere = {
+  AND: Array.from(PRODUCTIVE_CODES).map((c) => ({ NOT: { laborCode: { startsWith: c } } })),
+};
 
 /**
  * Mon 00:00 of this work week, Sat 00:00 (= end of Fri), and how many work days
