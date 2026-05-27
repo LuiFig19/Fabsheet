@@ -5,116 +5,136 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import imageCompression from "browser-image-compression";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { uploadAndExtract } from "@/lib/actions";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
-import { Camera, UploadCloud, Loader2, AlertTriangle, RotateCcw, CheckCircle2, Sparkles, ListChecks } from "lucide-react";
+import {
+  Camera, UploadCloud, Loader2, AlertTriangle, RotateCcw, CheckCircle2,
+  XCircle, FileImage, FileText,
+} from "lucide-react";
 
-type Phase = "idle" | "compressing" | "uploading" | "reading" | "validating";
+type Phase = "queued" | "compressing" | "uploading" | "reading" | "done" | "error";
+type Item = {
+  id: string;
+  file: File;
+  preview: string | null;
+  phase: Phase;
+  uploadId?: string;
+  error?: string;
+};
+
 const MAX_BYTES = 2 * 1024 * 1024;
+const CONCURRENCY = 3;
 
 export function UploadForm() {
   const router = useRouter();
+  const [items, setItems] = useState<Item[]>([]);
   const [pending, startTransition] = useTransition();
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [configure, setConfigure] = useState(false);
-  const [phase, setPhase] = useState<Phase>("idle");
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
 
-  async function pickFile(f: File | null) {
-    setError(null);
-    if (!f) return;
-    if (!(f.type.startsWith("image/") || f.type === "application/pdf")) {
-      setError("Only image or PDF files are supported.");
-      return;
+  function addFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const next: Item[] = [];
+    for (const f of Array.from(files)) {
+      const okType = f.type.startsWith("image/") || f.type === "application/pdf";
+      if (!okType) continue;
+      next.push({
+        id: `${Date.now()}-${f.name}-${Math.random().toString(36).slice(2, 6)}`,
+        file: f,
+        preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+        phase: "queued",
+      });
     }
-    let chosen = f;
-    if (f.type.startsWith("image/") && f.size > MAX_BYTES) {
-      setPhase("compressing");
-      try {
-        chosen = await imageCompression(f, { maxWidthOrHeight: 1920, maxSizeMB: 1.5, useWebWorker: true });
-      } catch {
-        chosen = f;
-      }
-      setPhase("idle");
-    }
-    setFile(chosen);
-    setPreviewUrl((old) => {
-      if (old) URL.revokeObjectURL(old);
-      return f.type.startsWith("image/") ? URL.createObjectURL(chosen) : null;
+    setItems((prev) => [...prev, ...next]);
+  }
+
+  function patch(id: string, p: Partial<Item>) {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...p } : it)));
+  }
+
+  function removeItem(id: string) {
+    setItems((prev) => {
+      const found = prev.find((it) => it.id === id);
+      if (found?.preview) URL.revokeObjectURL(found.preview);
+      return prev.filter((it) => it.id !== id);
     });
   }
 
-  function retake() {
-    setError(null);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
-    setFile(null);
+  function clearAll() {
+    items.forEach((it) => it.preview && URL.revokeObjectURL(it.preview));
+    setItems([]);
+  }
+
+  async function processOne(it: Item): Promise<{ ok: boolean; uploadId?: string; error?: string }> {
+    patch(it.id, { phase: "compressing" });
+    let f = it.file;
+    if (f.type.startsWith("image/") && f.size > MAX_BYTES) {
+      try {
+        f = await imageCompression(f, { maxWidthOrHeight: 1920, maxSizeMB: 1.5, useWebWorker: true });
+      } catch { /* fall back to original */ }
+    }
+    patch(it.id, { phase: "uploading" });
+    // Brief delay so user sees uploading state before "reading" takes over
+    await new Promise((r) => setTimeout(r, 120));
+    patch(it.id, { phase: "reading" });
+    const fd = new FormData();
+    fd.set("file", f);
+    const res = await uploadAndExtract(fd);
+    if (res.ok) {
+      patch(it.id, { phase: "done", uploadId: res.uploadId });
+      return { ok: true, uploadId: res.uploadId };
+    } else {
+      patch(it.id, { phase: "error", error: res.error });
+      return { ok: false, error: res.error };
+    }
+  }
+
+  // Concurrency-limited runner: at most CONCURRENCY uploads in flight at once.
+  async function runAll() {
+    const queue = items.filter((it) => it.phase === "queued" || it.phase === "error");
+    if (queue.length === 0) return;
+    const cursor = { i: 0 };
+    let ok = 0;
+    let fail = 0;
+    async function worker() {
+      while (cursor.i < queue.length) {
+        const idx = cursor.i++;
+        const r = await processOne(queue[idx]);
+        if (r.ok) ok++; else fail++;
+      }
+    }
+    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker());
+    await Promise.all(workers);
+    if (ok > 0) toast.success(`Read ${ok} timesheet${ok === 1 ? "" : "s"}` + (fail > 0 ? `, ${fail} failed` : ""));
+    if (fail > 0 && ok === 0) toast.error(`${fail} timesheet${fail === 1 ? "" : "s"} failed to read`);
+    // Route to the review queue so the manager sees the whole batch
+    if (ok > 0) router.push("/review");
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setError(null);
-    setConfigure(false);
-    if (!file) {
-      setError("Take or choose a photo of the timesheet first.");
+    if (items.length === 0) {
+      toast.error("Take or choose at least one photo.");
       return;
     }
-    const fd = new FormData();
-    fd.set("file", file);
-
-    startTransition(async () => {
-      // Step bumps run in the foreground; the server action below blocks until
-      // Vision returns, so we set "reading" before awaiting and trust the user
-      // sees real progress (the spinner + label change).
-      setPhase("uploading");
-      // Tiny delay so the user actually sees this label.
-      await new Promise((r) => setTimeout(r, 200));
-      setPhase("reading");
-      const res = await uploadAndExtract(fd);
-      if (res.ok) {
-        setPhase("validating");
-        await new Promise((r) => setTimeout(r, 250));
-        router.push(`/review/${res.uploadId}`);
-      } else {
-        setPhase("idle");
-        setError(res.error);
-        setConfigure(Boolean(res.configure));
-      }
-    });
+    startTransition(runAll);
   }
 
-  const busy = pending || phase !== "idle";
+  const busy = pending;
+  const doneCount = items.filter((it) => it.phase === "done").length;
+  const errorCount = items.filter((it) => it.phase === "error").length;
+  const queuedCount = items.filter((it) => it.phase === "queued").length;
 
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      {previewUrl ? (
-        <div className="space-y-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={previewUrl} alt="Timesheet preview" className="max-h-80 w-full rounded-lg border object-contain" />
-          <div className="flex justify-center">
-            <Button type="button" variant="outline" onClick={retake} className="min-h-[44px]" disabled={busy}>
-              <RotateCcw className="h-4 w-4" /> Retake
-            </Button>
-          </div>
-        </div>
-      ) : file ? (
-        <div className="rounded-lg border p-4 text-center text-sm">
-          {file.name}
-          <div className="mt-2">
-            <Button type="button" variant="outline" onClick={retake} className="min-h-[44px]">
-              <RotateCcw className="h-4 w-4" /> Choose a different file
-            </Button>
-          </div>
-        </div>
-      ) : (
+      {items.length === 0 ? (
         <div className="grid gap-3 sm:grid-cols-2">
           <button
             type="button"
             onClick={() => cameraRef.current?.click()}
-            className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input p-6 text-center hover:bg-muted/50"
+            className="flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input p-6 text-center hover:bg-muted/50"
           >
             <Camera className="h-8 w-8 text-primary" />
             <span className="text-sm font-medium">Take photo</span>
@@ -123,78 +143,112 @@ export function UploadForm() {
           <button
             type="button"
             onClick={() => libraryRef.current?.click()}
-            className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input p-6 text-center hover:bg-muted/50"
+            className="flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input p-6 text-center hover:bg-muted/50"
           >
             <UploadCloud className="h-8 w-8 text-muted-foreground" />
-            <span className="text-sm font-medium">Upload file</span>
-            <span className="text-xs text-muted-foreground">Photo or PDF from this device</span>
+            <span className="text-sm font-medium">Upload files</span>
+            <span className="text-xs text-muted-foreground">Drop up to 25 photos or PDFs</span>
           </button>
         </div>
-      )}
-
-      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
-      <input ref={libraryRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
-
-      {error && (
-        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <div>{error}</div>
-            {configure && (
-              <Link href="/settings" className="font-medium underline">Configure in Settings</Link>
-            )}
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">
+              {items.length} sheet{items.length === 1 ? "" : "s"}
+              {doneCount > 0 && <span className="ml-2 text-emerald-700">{doneCount} done</span>}
+              {errorCount > 0 && <span className="ml-2 text-destructive">{errorCount} failed</span>}
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => libraryRef.current?.click()} disabled={busy}>
+                <UploadCloud className="h-4 w-4" /> Add more
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={clearAll} disabled={busy}>
+                <RotateCcw className="h-4 w-4" /> Clear
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((it) => (
+              <FileTile key={it.id} item={it} onRemove={() => removeItem(it.id)} busy={busy} />
+            ))}
           </div>
         </div>
       )}
 
-      <Button type="submit" disabled={busy || !file} className="min-h-[48px] w-full text-base">
-        {busy ? (
-          <>
-            <Loader2 className="h-5 w-5 animate-spin" /> Reading the sheet...
-          </>
-        ) : (
-          <>
-            <UploadCloud className="h-5 w-5" /> Read this sheet
-          </>
-        )}
-      </Button>
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
+      <input ref={libraryRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
 
-      {busy && <ProgressSteps phase={phase} />}
+      {items.length > 0 && (
+        <Button type="submit" disabled={busy || queuedCount + errorCount === 0} className="min-h-[48px] w-full text-base">
+          {busy ? (
+            <><Loader2 className="h-5 w-5 animate-spin" /> Reading {queuedCount + items.filter(i => i.phase === "compressing" || i.phase === "uploading" || i.phase === "reading").length} sheets...</>
+          ) : doneCount === items.length && doneCount > 0 ? (
+            <><CheckCircle2 className="h-5 w-5" /> All read. Go to Review queue</>
+          ) : (
+            <><UploadCloud className="h-5 w-5" /> Read {queuedCount + errorCount} sheet{queuedCount + errorCount === 1 ? "" : "s"}</>
+          )}
+        </Button>
+      )}
 
       <p className="text-center text-xs text-muted-foreground">
-        The AI reads the welder's name and the date from the top of the sheet. You will not be asked to pick them.
+        Names and dates are auto-detected. You only fix what looks off in Review.
       </p>
     </form>
   );
 }
 
-function ProgressSteps({ phase }: { phase: Phase }) {
-  const steps: { key: Phase; label: string; icon: typeof Camera }[] = [
-    { key: "compressing", label: "Optimizing photo", icon: Camera },
-    { key: "uploading", label: "Uploading to server", icon: UploadCloud },
-    { key: "reading", label: "AI is reading the timesheet (this takes 10-20s)", icon: Sparkles },
-    { key: "validating", label: "Validating against your jobs", icon: ListChecks },
-  ];
-  const activeIdx = steps.findIndex((s) => s.key === phase);
-
+function FileTile({ item, onRemove, busy }: { item: Item; onRemove: () => void; busy: boolean }) {
+  const phaseLabel: Record<Phase, string> = {
+    queued: "Queued",
+    compressing: "Optimizing",
+    uploading: "Uploading",
+    reading: "Reading...",
+    done: "Done",
+    error: "Failed",
+  };
+  const phaseColor: Record<Phase, string> = {
+    queued: "bg-muted text-muted-foreground",
+    compressing: "bg-blue-100 text-blue-900",
+    uploading: "bg-blue-100 text-blue-900",
+    reading: "bg-amber-100 text-amber-900 animate-pulse",
+    done: "bg-emerald-100 text-emerald-900",
+    error: "bg-red-100 text-red-900",
+  };
   return (
-    <div className="space-y-2 rounded-md border bg-muted/40 p-3">
-      {steps.map((s, i) => {
-        const done = i < activeIdx;
-        const active = i === activeIdx;
-        return (
-          <div key={s.key} className={cn("flex items-center gap-3 text-sm", done && "text-muted-foreground", !done && !active && "opacity-50")}>
-            {done ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            ) : active ? (
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            ) : (
-              <s.icon className="h-4 w-4" />
-            )}
-            <span className={cn(active && "font-medium text-foreground")}>{s.label}</span>
+    <div className="overflow-hidden rounded-md border bg-card">
+      <div className="relative aspect-[4/3] bg-muted">
+        {item.preview ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={item.preview} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-muted-foreground">
+            <FileText className="h-10 w-10" />
           </div>
-        );
-      })}
+        )}
+        {!busy && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+            aria-label="Remove"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        )}
+        <Badge className={cn("absolute bottom-1.5 left-1.5", phaseColor[item.phase])}>
+          {item.phase === "done" ? <CheckCircle2 className="mr-1 h-3 w-3" /> : item.phase === "error" ? <AlertTriangle className="mr-1 h-3 w-3" /> : item.phase === "reading" ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <FileImage className="mr-1 h-3 w-3" />}
+          {phaseLabel[item.phase]}
+        </Badge>
+      </div>
+      <div className="p-2">
+        <div className="truncate text-xs font-medium">{item.file.name}</div>
+        {item.error && <div className="mt-0.5 text-[11px] text-destructive">{item.error}</div>}
+        {item.uploadId && (
+          <Link href={`/review/${item.uploadId}`} className="mt-0.5 inline-block text-[11px] text-primary underline">
+            Open in Review
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

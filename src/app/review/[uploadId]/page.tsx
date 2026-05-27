@@ -8,8 +8,10 @@ import { ReviewTable } from "./review-table";
 import { HeaderEdit } from "./header-edit";
 import { formatDate } from "@/lib/utils";
 import { getTenantContext, scopeWhere, tenantWhere } from "@/lib/tenant";
+import { getUploadUrl } from "@/lib/storage";
 import { TASK_BUBBLES, ACTION_BUBBLES } from "@/lib/extractors/types";
-import { AlertTriangle, FileText } from "lucide-react";
+import { AlertTriangle, FileText, ImageIcon, ExternalLink } from "lucide-react";
+import { PhotoPanel } from "./photo-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +33,14 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ u
     }),
   ]);
   if (!upload) notFound();
+
+  // Signed/public URL for the original photo so the manager can verify what
+  // they're approving. Errors here are non-fatal — we just hide the panel.
+  let photoUrl: string | null = null;
+  try {
+    photoUrl = await getUploadUrl({ filePath: upload.filePath, storageKey: upload.storageKey, storageUrl: upload.storageUrl });
+  } catch { photoUrl = null; }
+  const isPdf = upload.mimeType === "application/pdf";
 
   const threshold = company?.ocrThreshold ?? 0.7;
   const warnings = (upload.warnings as string[] | null) ?? [];
@@ -90,6 +100,8 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ u
         date={upload.date.toISOString().slice(0, 10)}
         employees={employees.map((e) => ({ id: e.id, name: e.name }))}
       />
+
+      {photoUrl && <PhotoPanel url={photoUrl} isPdf={isPdf} fileName={upload.filePath} />}
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">

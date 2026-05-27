@@ -31,6 +31,25 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const pct = job.budgetedHours > 0 ? (used / job.budgetedHours) * 100 : 0;
   const remaining = job.budgetedHours - used;
 
+  // Per-unit roll-up: budget is split evenly across units, hours grouped by
+  // unitNumber from the approved entries. Entries with no unit number get
+  // bucketed under "Unassigned" so they're still visible.
+  const perUnitBudget = job.quantity > 0 ? job.budgetedHours / job.quantity : 0;
+  const unitHours = new Map<number | null, number>();
+  for (const e of job.entries) {
+    const k = e.unitNumber ?? null;
+    unitHours.set(k, (unitHours.get(k) ?? 0) + e.decimalHours);
+  }
+  const unitRows = job.quantity > 1
+    ? Array.from({ length: job.quantity }, (_, i) => {
+        const n = i + 1;
+        const u = unitHours.get(n) ?? 0;
+        const t = budgetTier(u, perUnitBudget);
+        return { label: `Unit ${n} of ${job.quantity}`, used: u, budget: perUnitBudget, tier: t, pct: perUnitBudget > 0 ? (u / perUnitBudget) * 100 : 0 };
+      })
+    : [];
+  const unassignedUnitHours = unitHours.get(null) ?? 0;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -72,6 +91,31 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       </Card>
 
       <JobControls jobId={job.id} budgetedHours={job.budgetedHours} status={job.status} />
+
+      {unitRows.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-foreground">Per-unit progress</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Budget split evenly across {job.quantity} units ({fmtHours(perUnitBudget)} h each).
+              {unassignedUnitHours > 0 && ` ${fmtHours(unassignedUnitHours)} h were logged without a unit number.`}
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {unitRows.map((u) => (
+              <div key={u.label} className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium">{u.label}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {fmtHours(u.used)} / {fmtHours(u.budget)} h ({Math.round(u.pct)}%)
+                  </span>
+                </div>
+                <Progress pct={u.pct} tier={u.tier} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
