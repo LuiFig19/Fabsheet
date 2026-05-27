@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // Paths that never require an authenticated session.
-const PUBLIC = ["/login", "/api/auth"];
+const PUBLIC = ["/login", "/api/auth", "/api/diagnose"];
 
 // Middleware after basePath has been stripped. In single_tenant mode the
 // access prefix is enforced by basePath (Next 404s bare paths), so here we:
