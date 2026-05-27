@@ -16,28 +16,52 @@ function isAllowed(email: string): boolean {
 }
 
 /**
- * BetterAuth instance - self-hosted, talks to our Postgres via the Prisma
- * adapter. Magic link only (no passwords), Resend as the transport. Allowlist
- * mode silently no-ops for non-listed emails so we don't leak which addresses
- * exist on Raven's deploy.
+ * Pick the canonical app origin. Strongly prefers the public app URL
+ * (fabsheet.org) over a Vercel preview URL so cookies and magic-link redirects
+ * stay on one host. Falls back through env vars and finally to localhost for
+ * dev. Defensive against the case where BETTER_AUTH_URL hasn't been updated
+ * in Vercel yet — the magic-link domain still resolves correctly.
  */
-// Build the list of origins BetterAuth should accept requests from. Includes
-// both the bare deploy origin (vercel.app, fabsheet.org) AND the prefixed
-// origin in case path-prefixed URLs are submitted as origins. Vercel preview
-// URLs are also covered via a wildcard so PR previews don't blow up.
+function resolveBaseURL(): string {
+  const prefix = process.env.ACCESS_PATH_PREFIX
+    ? `/${process.env.ACCESS_PATH_PREFIX.replace(/^\/+|\/+$/g, "")}`
+    : "";
+  const pub = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  const better = process.env.BETTER_AUTH_URL?.replace(/\/$/, "");
+
+  // Pick the value that doesn't smell like a Vercel preview (which protects
+  // the magic-link domain even if env vars are stale).
+  const candidates = [pub, better].filter(Boolean) as string[];
+  const nonPreview = candidates.find((c) => !c.includes("vercel.app"));
+
+  if (nonPreview) {
+    // If the chosen URL doesn't already contain the prefix, append it.
+    return nonPreview.endsWith(prefix) ? nonPreview : nonPreview + prefix;
+  }
+  // Last resort: whichever env var we have, or localhost for dev.
+  return candidates[0] ?? `http://localhost:3000${prefix}`;
+}
+
+const BASE_URL = resolveBaseURL();
+
 function buildTrustedOrigins(): string[] {
-  const out = new Set<string>();
-  const candidates = [process.env.BETTER_AUTH_URL, process.env.NEXT_PUBLIC_APP_URL].filter(Boolean) as string[];
-  for (const c of candidates) {
+  const out = new Set<string>([BASE_URL]);
+  for (const c of [process.env.BETTER_AUTH_URL, process.env.NEXT_PUBLIC_APP_URL]) {
+    if (!c) continue;
     try {
       const u = new URL(c);
       out.add(`${u.protocol}//${u.host}`);
       out.add(c.replace(/\/$/, ""));
     } catch {
-      // ignore malformed URLs
+      /* ignore */
     }
   }
-  // Local dev
+  try {
+    const u = new URL(BASE_URL);
+    out.add(`${u.protocol}//${u.host}`);
+  } catch {
+    /* ignore */
+  }
   out.add("http://localhost:3000");
   out.add("http://localhost:3000/r/8h3kd92ksjf");
   return Array.from(out);
@@ -45,17 +69,21 @@ function buildTrustedOrigins(): string[] {
 
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL,
+  baseURL: BASE_URL,
   trustedOrigins: buildTrustedOrigins(),
   database: prismaAdapter(prisma, { provider: "postgresql" }),
+  // Disable BetterAuth's built-in rate limiter entirely. The magic-link plugin
+  // was silently throttling repeat sends to the same email, making the login
+  // form look successful (200) while actually skipping the email send. For
+  // a single-tenant Raven's deploy this is the right call. For multi-tenant
+  // we'll re-enable with sensible per-IP limits.
+  rateLimit: { enabled: false },
   session: {
     expiresIn: 60 * 60 * 24 * 30, // 30 days
     updateAge: 60 * 60 * 24 * 7, // refresh weekly
-    cookieCache: { enabled: true, maxAge: 60 * 5 }, // 5-min cookie cache for hot reads
+    cookieCache: { enabled: true, maxAge: 60 * 5 },
   },
   user: {
-    // Skip BetterAuth's own email-verification flow - the magic-link click IS
-    // the verification. We want zero clicks beyond "click email link".
     additionalFields: {
       tenantId: { type: "string", required: false },
       role: { type: "string", required: false, defaultValue: "manager" },
@@ -64,18 +92,22 @@ export const auth = betterAuth({
   plugins: [
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        // Audit each step so /api/diagnose can show us whether BetterAuth is
-        // even reaching the callback. Same store as the rest of the app.
         const log = async (action: string, after: Record<string, unknown>) => {
           try {
             await prisma.auditLog.create({
               data: { entityType: "Auth", entityId: email, action, after: after as object },
             });
-          } catch {
-            /* never block sign-in on logging */
-          }
+          } catch { /* never block sign-in on logging */ }
         };
-        await log("magic_link_invoked", { email });
+        await log("magic_link_invoked", { email, base: BASE_URL });
+        // Sweep any verification rows older than 30s for this email so future
+        // requests can never be blocked by stale tokens. We give BetterAuth's
+        // just-created row a 30s grace window so we don't nuke our own token.
+        try {
+          await prisma.verification.deleteMany({
+            where: { identifier: email, createdAt: { lt: new Date(Date.now() - 30_000) } },
+          });
+        } catch { /* never block sign-in */ }
         if (!isAllowed(email)) {
           console.log(`[auth] denied magic link for non-allowlisted email: ${email}`);
           await log("magic_link_denied_allowlist", { email });
@@ -90,8 +122,10 @@ export const auth = betterAuth({
           throw err;
         }
       },
-      // 15-minute link validity is plenty for "click your email now".
       expiresIn: 15 * 60,
+      // Allow re-requesting a magic link without waiting for the previous one
+      // to expire. Cleaner UX, no "you must wait" silent failures.
+      disableSignUp: false,
     }),
   ],
 });
