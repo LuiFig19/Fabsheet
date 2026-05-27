@@ -12,6 +12,18 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
 
+  // BetterAuth redirects to callbackURL after a successful magic-link click.
+  // We must include Next's basePath (the access prefix) or the browser lands
+  // on an unrouted path and shows a blank page. Build the absolute URL from
+  // the current location so prefix changes never break the redirect.
+  function absoluteCallback(path: string): string {
+    if (typeof window === "undefined") return path;
+    const m = /^(\/r\/[A-Za-z0-9_-]+)(?:\/|$)/.exec(window.location.pathname);
+    const prefix = m ? m[1] : "";
+    const clean = path.startsWith("/") ? path : `/${path}`;
+    return window.location.origin + prefix + clean;
+  }
+
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -23,7 +35,7 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
     }
     startTransition(async () => {
       try {
-        const res = await signIn.magicLink({ email, callbackURL: nextUrl });
+        const res = await signIn.magicLink({ email, callbackURL: absoluteCallback(nextUrl) });
         if (res && typeof res === "object" && "error" in res && res.error) {
           // Surface BetterAuth's message so misconfig is obvious to the admin,
           // but still tell the end user a generic line.
