@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createJob } from "@/lib/jobs-actions";
+import { toast } from "@/components/ui/sonner";
 import { Plus, X } from "lucide-react";
 
 export function AddJob() {
@@ -20,10 +21,12 @@ export function AddJob() {
     startTransition(async () => {
       const res = await createJob(fd);
       if (res.ok) {
+        toast.success("Job created");
         setOpen(false);
         router.refresh();
       } else {
         setError(res.error ?? "Could not create job.");
+        toast.error(res.error ?? "Could not create job.");
       }
     });
   }

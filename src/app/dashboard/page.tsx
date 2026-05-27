@@ -14,6 +14,7 @@ import {
   productiveCodeWhere,
   nonProductiveCodeWhere,
 } from "@/lib/utils";
+import { detectAnomalies } from "@/lib/anomalies";
 import { Upload, ClipboardCheck, AlertTriangle, ArrowRight, Target } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ export default async function DashboardPage() {
   const s = scopeWhere(ctx);
   const { weekStart, weekEnd, daysRemaining, onWeekend } = workWeekProgress();
 
-  const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company] = await Promise.all([
+  const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company, anomalies, multiUnitEntries] = await Promise.all([
     prisma.job.findMany({ where: { ...s, status: "active" }, orderBy: { workOrderNumber: "asc" } }),
     approvedHoursByJob(ctx),
     // Productive = direct fab work (see PRODUCTIVE_CODES in lib/utils).
@@ -45,7 +46,23 @@ export default async function DashboardPage() {
       include: { employee: true, _count: { select: { entries: true } } },
     }),
     prisma.company.findFirst({ where: tenantWhere(ctx) }),
+    detectAnomalies(ctx),
+    // Approved entry hours per (jobId, unitNumber) for multi-unit jobs only,
+    // so the dashboard job cards can render mini per-unit bars.
+    prisma.timesheetEntry.findMany({
+      where: { ...s, status: "approved", jobId: { not: null }, unitNumber: { not: null }, job: { quantity: { gt: 1 } } },
+      select: { jobId: true, unitNumber: true, decimalHours: true },
+    }),
   ]);
+
+  // Build a per-job, per-unit hours map for the multi-unit cards.
+  const unitHoursByJob = new Map<string, Map<number, number>>();
+  for (const e of multiUnitEntries) {
+    if (!e.jobId || e.unitNumber == null) continue;
+    if (!unitHoursByJob.has(e.jobId)) unitHoursByJob.set(e.jobId, new Map());
+    const m = unitHoursByJob.get(e.jobId)!;
+    m.set(e.unitNumber, (m.get(e.unitNumber) ?? 0) + e.decimalHours);
+  }
 
   const productiveThisWeek = productiveAgg._sum.decimalHours ?? 0;
   const supportThisWeek = supportAgg._sum.decimalHours ?? 0;
@@ -118,6 +135,26 @@ export default async function DashboardPage() {
         onTrack={onTrack}
       />
 
+      {anomalies.length > 0 && (
+        <Card className="border-amber-300">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-amber-900">
+              <AlertTriangle className="h-4 w-4" /> Needs attention ({anomalies.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {anomalies.map((a, i) => (
+              <div key={i} className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm">
+                <Badge variant={a.severity === "warn" ? "warning" : "muted"} className="shrink-0">
+                  {a.kind.replace("_", " ")}
+                </Badge>
+                <span className="text-amber-950">{a.message}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <div>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Job progress</h2>
@@ -148,6 +185,29 @@ export default async function DashboardPage() {
                       <span>{fmtHours(used)} h used</span>
                       <span>{fmtHours(j.budgetedHours)} h budget</span>
                     </div>
+                    {j.quantity > 1 && (() => {
+                      const perUnitBudget = j.budgetedHours / j.quantity;
+                      const m = unitHoursByJob.get(j.id) ?? new Map<number, number>();
+                      return (
+                        <div className="space-y-1.5 border-t pt-2">
+                          {Array.from({ length: j.quantity }, (_, i) => {
+                            const n = i + 1;
+                            const u = m.get(n) ?? 0;
+                            const uTier = budgetTier(u, perUnitBudget);
+                            const uPct = perUnitBudget > 0 ? (u / perUnitBudget) * 100 : 0;
+                            return (
+                              <div key={n} className="space-y-0.5">
+                                <div className="flex justify-between text-[11px] text-muted-foreground tabular-nums">
+                                  <span>Unit {n}/{j.quantity}</span>
+                                  <span>{fmtHours(u)} / {fmtHours(perUnitBudget)} h</span>
+                                </div>
+                                <Progress pct={uPct} tier={uTier} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               </Link>

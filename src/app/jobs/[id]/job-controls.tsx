@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { setJobStatus, updateJobBudget } from "@/lib/jobs-actions";
+import { toast } from "@/components/ui/sonner";
 
 export function JobControls({ jobId, budgetedHours, status }: { jobId: string; budgetedHours: number; status: string }) {
   const router = useRouter();
@@ -17,6 +18,7 @@ export function JobControls({ jobId, budgetedHours, status }: { jobId: string; b
     if (Number.isNaN(n)) return;
     startTransition(async () => {
       await updateJobBudget(jobId, n);
+      toast.success(`Budget set to ${n} h`);
       router.refresh();
     });
   }
@@ -24,6 +26,7 @@ export function JobControls({ jobId, budgetedHours, status }: { jobId: string; b
   function changeStatus(next: "active" | "complete" | "on_hold") {
     startTransition(async () => {
       await setJobStatus(jobId, next);
+      toast.success(next === "complete" ? "Job marked complete" : next === "on_hold" ? "Job put on hold" : "Job reopened");
       router.refresh();
     });
   }

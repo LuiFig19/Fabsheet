@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn, computeDecimalHours, fmtHours } from "@/lib/utils";
 import { addRow, approveAll, approveEntry, deleteRow, updateEntry } from "@/lib/actions";
+import { toast } from "@/components/ui/sonner";
 import { Check, Plus, Trash2, CheckCheck, AlertTriangle } from "lucide-react";
 
 type Entry = {
@@ -95,10 +96,10 @@ export function ReviewTable({
           {rows.length} row{rows.length === 1 ? "" : "s"} . {pendingCount} pending approval
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => doAction(() => addRow(uploadId))} disabled={pending}>
+          <Button size="sm" variant="outline" onClick={() => { doAction(() => addRow(uploadId)); toast.success("Row added"); }} disabled={pending}>
             <Plus className="h-4 w-4" /> Add row
           </Button>
-          <Button size="sm" variant="success" onClick={() => doAction(() => approveAll(uploadId))} disabled={pending || pendingCount === 0}>
+          <Button size="sm" variant="success" onClick={() => { const n = pendingCount; doAction(() => approveAll(uploadId)); toast.success(`Approved ${n} row${n === 1 ? "" : "s"}`); }} disabled={pending || pendingCount === 0}>
             <CheckCheck className="h-4 w-4" /> Approve all
           </Button>
         </div>
@@ -179,11 +180,11 @@ export function ReviewTable({
                     {e.status === "approved" ? (
                       <Badge variant="success"><Check className="mr-1 h-3 w-3" /> approved</Badge>
                     ) : (
-                      <Button size="sm" variant="success" onClick={() => doAction(() => approveEntry(e.id))} disabled={pending}>
+                      <Button size="sm" variant="success" onClick={() => { setLocal(e.id, { status: "approved" }); doAction(() => approveEntry(e.id)); toast.success("Row approved"); }} disabled={pending}>
                         <Check className="h-3.5 w-3.5" /> Approve
                       </Button>
                     )}
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => doAction(() => deleteRow(e.id))} disabled={pending} title="Delete row">
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => { doAction(() => deleteRow(e.id)); toast.success("Row deleted"); }} disabled={pending} title="Delete row">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
