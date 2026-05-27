@@ -15,9 +15,21 @@ export async function GET() {
 
   let dbOk = false;
   let userCount = 0;
+  let recentAuth: { action: string; createdAt: string; detail: unknown }[] = [];
   try {
     userCount = await prisma.user.count();
     dbOk = true;
+    const logs = await prisma.auditLog.findMany({
+      where: { entityType: { in: ["Auth", "Ocr"] } },
+      orderBy: { createdAt: "desc" },
+      take: 15,
+      select: { action: true, createdAt: true, after: true },
+    });
+    recentAuth = logs.map((l) => ({
+      action: l.action,
+      createdAt: l.createdAt.toISOString(),
+      detail: l.after,
+    }));
   } catch {
     dbOk = false;
   }
@@ -61,5 +73,6 @@ export async function GET() {
       reachable: dbOk,
       user_count: userCount,
     },
+    recent_auth_events: recentAuth,
   });
 }

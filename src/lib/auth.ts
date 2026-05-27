@@ -64,13 +64,31 @@ export const auth = betterAuth({
   plugins: [
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        // Allowlist guard: pretend to send for non-allowed addresses (no email
-        // is actually transmitted), to avoid revealing which emails exist.
+        // Audit each step so /api/diagnose can show us whether BetterAuth is
+        // even reaching the callback. Same store as the rest of the app.
+        const log = async (action: string, after: Record<string, unknown>) => {
+          try {
+            await prisma.auditLog.create({
+              data: { entityType: "Auth", entityId: email, action, after },
+            });
+          } catch {
+            /* never block sign-in on logging */
+          }
+        };
+        await log("magic_link_invoked", { email });
         if (!isAllowed(email)) {
           console.log(`[auth] denied magic link for non-allowlisted email: ${email}`);
+          await log("magic_link_denied_allowlist", { email });
           return;
         }
-        await sendMagicLinkEmail(email, url);
+        try {
+          await sendMagicLinkEmail(email, url);
+          await log("magic_link_sent", { email, url_host: new URL(url).host });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          await log("magic_link_send_failed", { email, message });
+          throw err;
+        }
       },
       // 15-minute link validity is plenty for "click your email now".
       expiresIn: 15 * 60,
