@@ -37,13 +37,22 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // /login page is unauth so it gets a clean centered layout. We check the
   // session directly so it's not coupled to tenant resolution (single_tenant
   // always resolves a tenant even when nobody is signed in).
-  const session = await auth.api.getSession({ headers: await headers() }).catch(() => null);
-  const ctx = session ? await getTenantContextSafe() : null;
+  //
+  // Kill switch: with AUTH_DISABLED=true the shell renders for everyone, with
+  // a placeholder user identity in the sidebar, so the site is fully
+  // browseable while auth is being fixed.
+  const authDisabled = process.env.AUTH_DISABLED === "true";
+  const session = authDisabled
+    ? null
+    : await auth.api.getSession({ headers: await headers() }).catch(() => null);
+  const ctx = authDisabled || session ? await getTenantContextSafe() : null;
   const company = ctx?.tenant.displayName || ctx?.tenant.name || PRODUCT;
   const user = ctx?.user
     ? { name: ctx.user.name, email: ctx.user.email, role: ctx.user.role }
-    : null;
-  const showShell = Boolean(session && ctx);
+    : authDisabled
+      ? { name: "Auth disabled", email: "(temp)", role: "browse-only" }
+      : null;
+  const showShell = authDisabled || Boolean(session && ctx);
 
   return (
     <html lang="en" suppressHydrationWarning>

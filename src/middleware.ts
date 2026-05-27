@@ -20,6 +20,12 @@ export function middleware(req: NextRequest) {
   const headers = new Headers(req.headers);
   if (mode === "single_tenant") headers.set("x-tenant-slug", process.env.DEFAULT_TENANT_SLUG || "ravens");
 
+  // Kill switch: set AUTH_DISABLED=true in Vercel to bypass the session check
+  // entirely. BetterAuth, routes, and code stay in place — just no redirect.
+  // Remove the env var (or set false) to re-enable auth.
+  const authDisabled = process.env.AUTH_DISABLED === "true";
+  if (authDisabled) return NextResponse.next({ request: { headers } });
+
   if (isPublic) return NextResponse.next({ request: { headers } });
 
   const hasSession =
