@@ -69,7 +69,7 @@ export const auth = betterAuth({
         const log = async (action: string, after: Record<string, unknown>) => {
           try {
             await prisma.auditLog.create({
-              data: { entityType: "Auth", entityId: email, action, after },
+              data: { entityType: "Auth", entityId: email, action, after: after as object },
             });
           } catch {
             /* never block sign-in on logging */
