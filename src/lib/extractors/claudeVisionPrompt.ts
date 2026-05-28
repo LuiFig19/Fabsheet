@@ -31,8 +31,7 @@ WHAT TO RETURN PER ROW
   does not require it; do NOT flag a blank UNIT - the server decides whether the
   job needs one.
 - unitTotal: the second small write-in (after "of"). null if blank.
-- startedTime: HH:MM in 24-hour. A morning "7" = 07:00. An afternoon "1:30"
-  on a shop sheet = 13:30. Use surrounding rows + ordering as context.
+- startedTime: HH:MM in 24-hour. See SHOP TIME RULES below.
 - finishedTime: HH:MM in 24-hour, same rules.
 - taskBubble: ONE of the nine TASK options, or null. See bubble rules below.
 - actionBubble: ONE of the four ACTION options, or null. See bubble rules below.
@@ -58,10 +57,28 @@ NOTES RULES
   discard, never decide "the bubble already covered this so I'll skip notes".
 - Notes are NEVER flagged just for being non-empty. Leave warnings alone.
 
+SHOP TIME RULES (Raven's is day-shift only, no nights)
+- A bare number with no colon means "on the hour". Write "5" -> 05:00.
+- Welders write 12-hour clock without AM/PM. The shop runs roughly 5 AM to 4 PM.
+  Hours 5-11 are AM. Hour 12 is noon. Hours 1-4 are PM (return as 13:00-16:00).
+- A colon is only needed when minutes are not zero. "5:30" -> 05:30. "1:30" -> 13:30.
+- Return HH:MM 24-hour regardless of how it was written. Do NOT flag a missing
+  colon or missing AM/PM as a problem. Do NOT suggest the welder meant "5:00"
+  or "13:00" - just convert and move on.
+
 EMPTY ROWS
 - If a row has no JOB #, no bubbles, no times, no notes - that row is empty.
   Return null in that row's array position (so position is preserved) and DO
   NOT add a warning for the empty row.
+
+NAME AND DATE
+- employeeName: return whatever the welder wrote, exactly. A first name alone
+  is fine ("Glenn"). A first + initial is fine ("Glenn S"). Do NOT expand or
+  guess a last name.
+- date: return as YYYY-MM-DD if the year is clear. Welders often write short
+  forms like "1/1/26" - normalize that to "2026-01-01" (two-digit years are
+  always 20xx). If the date is genuinely unreadable, return empty + confidence
+  0 and add a warning.
 
 CONFIDENCE
 - 1.0 = read clearly, certain.

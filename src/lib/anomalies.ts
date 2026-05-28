@@ -82,11 +82,13 @@ export async function detectAnomalies(ctx: TenantContext): Promise<Anomaly[]> {
     });
     const t = total._sum.decimalHours ?? 0;
     const r = recent._sum.decimalHours ?? 0;
-    if (t > 0 && r / t > 0.25) {
+    const baseline = t - r; // hours that existed BEFORE the last 24h
+    // Need a real baseline (>10h) or this just lights up every new job at 100%.
+    if (baseline > 10 && r / baseline > 0.25) {
       out.push({
         kind: "job_jump",
         severity: "info",
-        message: `Job ${j.workOrderNumber} (${j.customerName || "?"}) added ${r.toFixed(1)} h in the last 24h (${Math.round((r / t) * 100)}% of total).`,
+        message: `Job ${j.workOrderNumber} (${j.customerName || "?"}) added ${r.toFixed(1)} h in the last 24h, +${Math.round((r / baseline) * 100)}% over prior ${baseline.toFixed(1)} h.`,
       });
     }
   }

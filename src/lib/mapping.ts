@@ -120,7 +120,14 @@ export function entriesFromExtraction(input: MappingInput): MappingOutput {
       if (v) warnings.push(v);
     }
 
-    const decimalHours = computeDecimalHours(row.startedTime.value, row.finishedTime.value);
+    // Normalize times from whatever shorthand the welder wrote (5, 5:30,
+    // 1, 1pm, 12, etc.) to HH:MM 24-hour. If we can't parse, store empty
+    // so the field gets flagged in Review.
+    const startTime = normalizeShopTime(row.startedTime.value) || row.startedTime.value;
+    const endTime = normalizeShopTime(row.finishedTime.value) || row.finishedTime.value;
+    const decimalHours = computeDecimalHours(startTime, endTime);
+    if (!normalizeShopTime(row.startedTime.value)) warnings.push(`Could not read start time "${row.startedTime.value}".`);
+    if (!normalizeShopTime(row.finishedTime.value)) warnings.push(`Could not read finish time "${row.finishedTime.value}".`);
 
     drafts.push({
       workOrderNumber: wo,
@@ -129,8 +136,8 @@ export function entriesFromExtraction(input: MappingInput): MappingOutput {
       unitTotal,
       description,
       laborCode,
-      startTime: row.startedTime.value,
-      endTime: row.finishedTime.value,
+      startTime,
+      endTime,
       decimalHours,
       notes,
       confidenceByField: {
@@ -177,38 +184,131 @@ export function matchJobId(
 }
 
 /**
- * Fuzzy match an OCR'd employee name to one of the active employees. Returns
- * the matched id or null. Case-insensitive; accepts a partial first-name +
- * last-initial style like "Glenn Sw" matching "Glenn Swinger".
+ * Match an OCR'd employee name to one of the active employees.
+ *  - If the welder writes just a first name and that first name is unique in
+ *    the active roster, match it.
+ *  - If the welder writes "Glenn Sw" (first + last-initial style), match it.
+ *  - If the first name has duplicates (e.g. two "Luis"es), require a last
+ *    name. Otherwise return null so the manager picks.
+ *  - If the name doesn't appear at all, return null (new employee — flag).
  */
 export function matchEmployee(name: string, employees: { id: string; name: string; active: boolean }[]): { id: string; name: string } | null {
   if (!name) return null;
   const q = name.toLowerCase().trim().replace(/\s+/g, " ");
+  if (!q) return null;
   const active = employees.filter((e) => e.active);
-  // exact
+
+  // 1. exact full-name match
   const exact = active.find((e) => e.name.toLowerCase() === q);
   if (exact) return exact;
-  // startsWith (first word + first chars of second)
+
+  // 2. first-name unique match (the common case — welder wrote "Glenn")
   const parts = q.split(" ");
+  if (parts.length === 1) {
+    const firstName = parts[0];
+    const byFirst = active.filter((e) => e.name.toLowerCase().split(" ")[0] === firstName);
+    if (byFirst.length === 1) return byFirst[0];
+    if (byFirst.length > 1) return null; // duplicate first names — manager picks
+  }
+
+  // 3. partial match: each input segment starts with the corresponding name
+  //    segment ("Glenn Sw" -> "Glenn Swinger", "Luis F" -> "Luis Figueroa")
   const candidates = active.filter((e) => {
-    const en = e.name.toLowerCase();
-    return parts.every((p, i) => {
-      const seg = en.split(" ")[i] ?? "";
-      return seg.startsWith(p);
-    });
+    const segs = e.name.toLowerCase().split(" ");
+    return parts.every((p, i) => (segs[i] ?? "").startsWith(p));
   });
   if (candidates.length === 1) return candidates[0];
-  // last-resort substring on full name
+
+  // 4. substring fallback (handles initials, middle bits)
   const sub = active.filter((e) => e.name.toLowerCase().includes(q));
   if (sub.length === 1) return sub[0];
   return null;
 }
 
-/** Parse a YYYY-MM-DD string from the OCR header into a Date, or null. */
+/**
+ * Parse a date string from the OCR header. Accepts the formats welders
+ * actually write:
+ *   - 1/1/26, 01/01/26, 1/1/2026, 01/01/2026
+ *   - 1-1-26, 01-01-2026
+ *   - 2026-01-01 (ISO, what the Vision model returns when it can)
+ * Two-digit years assume 2000+ (so 26 -> 2026, 99 -> 2099). The shop is in
+ * the US so MM/DD ordering is assumed.
+ */
 export function parseHeaderDate(s: string): Date | null {
   if (!s) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
-  if (!m) return null;
-  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00Z`); // noon UTC to avoid TZ drift
+  const t = s.trim();
+  if (!t) return null;
+
+  // ISO yyyy-mm-dd
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
+  if (iso) return makeDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
+  // m/d/y or m-d-y (US ordering: month first)
+  const us = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/.exec(t);
+  if (us) {
+    const month = Number(us[1]);
+    const day = Number(us[2]);
+    let year = Number(us[3]);
+    if (year < 100) year += 2000; // 26 -> 2026
+    return makeDate(year, month, day);
+  }
+
+  return null;
+}
+function makeDate(year: number, month: number, day: number): Date | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  // Noon UTC so the date doesn't drift across local time zones.
+  const d = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Normalize a time string from the timesheet. Raven's runs day-shift only
+ * (5 AM through 4 PM), so:
+ *   - "5"     -> "05:00"  (5 AM)
+ *   - "7:30"  -> "07:30"
+ *   - "12"    -> "12:00"  (noon)
+ *   - "1"     -> "13:00"  (1 PM — no night shift, so 1-4 always PM)
+ *   - "1:30"  -> "13:30"
+ *   - "13:00" -> "13:00"  (already 24h, pass through)
+ *   - "16:00" -> "16:00"
+ * Anything we can't parse returns "" so the field is flagged for review.
+ */
+export function normalizeShopTime(s: string | null | undefined): string {
+  if (!s) return "";
+  const t = String(s).trim().toLowerCase();
+  if (!t) return "";
+
+  // Explicit AM/PM in case the welder wrote "5pm" or "5 pm"
+  const ampm = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/.exec(t);
+  if (ampm) {
+    let h = Number(ampm[1]);
+    const m = Number(ampm[2] ?? "0");
+    if (ampm[3] === "pm" && h !== 12) h += 12;
+    if (ampm[3] === "am" && h === 12) h = 0;
+    return fmtHHMM(h, m);
+  }
+
+  // HH:MM or H:MM
+  const colon = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (colon) {
+    let h = Number(colon[1]);
+    const m = Number(colon[2]);
+    if (h >= 1 && h <= 4) h += 12; // Raven's day-shift PM inference
+    return fmtHHMM(h, m);
+  }
+
+  // Just a number ("5", "12")
+  const intOnly = /^(\d{1,2})$/.exec(t);
+  if (intOnly) {
+    let h = Number(intOnly[1]);
+    if (h >= 1 && h <= 4) h += 12; // PM inference
+    return fmtHHMM(h, 0);
+  }
+
+  return ""; // unparseable — caller flags
+}
+function fmtHHMM(h: number, m: number): string {
+  if (h < 0 || h > 23 || m < 0 || m > 59) return "";
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
