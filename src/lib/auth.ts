@@ -1,94 +1,107 @@
 import { betterAuth } from "better-auth";
 import { magicLink } from "better-auth/plugins";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { Resend } from "resend";
 import { prisma } from "@/lib/db";
-import { sendMagicLinkEmail } from "@/lib/email";
 
-const allowlistMode = (process.env.AUTH_MODE ?? "allowlist") === "allowlist";
+// ---------------------------------------------------------------------------
+// Config helpers
+// ---------------------------------------------------------------------------
 
-function isAllowed(email: string): boolean {
-  if (!allowlistMode) return true;
-  const list = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return list.includes(email.trim().toLowerCase());
-}
+const PRODUCT = process.env.NEXT_PUBLIC_APP_NAME || "FabSheet";
 
-/**
- * Pick the canonical app origin. Strongly prefers the public app URL
- * (fabsheet.org) over a Vercel preview URL so cookies and magic-link redirects
- * stay on one host. Falls back through env vars and finally to localhost for
- * dev. Defensive against the case where BETTER_AUTH_URL hasn't been updated
- * in Vercel yet — the magic-link domain still resolves correctly.
- */
+/** Canonical app origin INCLUDING the access-path prefix. Prefers the public
+ *  domain (fabsheet.org) over a Vercel preview URL so magic links + cookies all
+ *  live on one host even if BETTER_AUTH_URL was never updated in Vercel. */
 function resolveBaseURL(): string {
   const prefix = process.env.ACCESS_PATH_PREFIX
     ? `/${process.env.ACCESS_PATH_PREFIX.replace(/^\/+|\/+$/g, "")}`
     : "";
-  const pub = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  const better = process.env.BETTER_AUTH_URL?.replace(/\/$/, "");
-
-  // Pick the value that doesn't smell like a Vercel preview (which protects
-  // the magic-link domain even if env vars are stale).
-  const candidates = [pub, better].filter(Boolean) as string[];
-  const nonPreview = candidates.find((c) => !c.includes("vercel.app"));
-
-  if (nonPreview) {
-    // If the chosen URL doesn't already contain the prefix, append it.
-    return nonPreview.endsWith(prefix) ? nonPreview : nonPreview + prefix;
-  }
-  // Last resort: whichever env var we have, or localhost for dev.
-  return candidates[0] ?? `http://localhost:3000${prefix}`;
+  const candidates = [process.env.NEXT_PUBLIC_APP_URL, process.env.BETTER_AUTH_URL]
+    .filter(Boolean)
+    .map((c) => (c as string).replace(/\/$/, ""));
+  const chosen = candidates.find((c) => !c.includes("vercel.app")) ?? candidates[0] ?? "http://localhost:3000";
+  return chosen.endsWith(prefix) || prefix === "" ? chosen : chosen + prefix;
 }
 
-const BASE_URL = resolveBaseURL();
+export const BASE_URL = resolveBaseURL();
 
-function buildTrustedOrigins(): string[] {
-  const out = new Set<string>([BASE_URL]);
-  for (const c of [process.env.BETTER_AUTH_URL, process.env.NEXT_PUBLIC_APP_URL]) {
-    if (!c) continue;
-    try {
-      const u = new URL(c);
-      out.add(`${u.protocol}//${u.host}`);
-      out.add(c.replace(/\/$/, ""));
-    } catch {
-      /* ignore */
-    }
-  }
-  try {
-    const u = new URL(BASE_URL);
-    out.add(`${u.protocol}//${u.host}`);
-  } catch {
-    /* ignore */
-  }
-  out.add("http://localhost:3000");
-  out.add("http://localhost:3000/r/8h3kd92ksjf");
-  return Array.from(out);
+function allowlistOK(email: string): boolean {
+  if ((process.env.AUTH_MODE ?? "allowlist") !== "allowlist") return true;
+  const list = (process.env.ALLOWED_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return list.length === 0 || list.includes(email.trim().toLowerCase());
 }
+
+/** Send the magic-link email through Resend. Inlined here (no indirection) so
+ *  the whole send path is one function. Throws on failure so BetterAuth surfaces
+ *  the error to the caller instead of silently swallowing it. */
+async function sendMagicLinkEmail(email: string, url: string): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.DEFAULT_FROM_EMAIL || `${PRODUCT} <onboarding@resend.dev>`;
+  if (!apiKey) {
+    console.log(`[auth] RESEND_API_KEY missing. Would send to ${email}: ${url}`);
+    return;
+  }
+  const resend = new Resend(apiKey);
+  const { error } = await resend.emails.send({
+    from,
+    to: [email],
+    subject: `Sign in to ${PRODUCT}`,
+    text: `Sign in to ${PRODUCT}:\n\n${url}\n\nThis link expires in 15 minutes. If you did not request it, ignore this email.`,
+    html: `
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;padding:24px 0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">
+        <tr><td align="center">
+          <table width="460" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
+            <tr><td style="background:#0A1929;padding:16px 24px;color:#fff;font-weight:600;">${PRODUCT}</td></tr>
+            <tr><td style="padding:24px;color:#111827;font-size:15px;line-height:1.5;">
+              <p style="margin:0 0 20px;">Click to sign in.</p>
+              <p style="margin:0 0 24px;"><a href="${url}" style="background:#0A1929;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:500;display:inline-block;">Sign in to ${PRODUCT}</a></p>
+              <p style="margin:0 0 8px;color:#6b7280;font-size:13px;">Or paste this link:</p>
+              <p style="margin:0;color:#374151;font-size:12px;word-break:break-all;">${url}</p>
+            </td></tr>
+          </table>
+        </td></tr>
+      </table>`,
+  });
+  if (error) throw new Error(typeof error === "string" ? error : JSON.stringify(error));
+}
+
+// ---------------------------------------------------------------------------
+// BetterAuth instance
+// ---------------------------------------------------------------------------
 
 export const auth = betterAuth({
+  appName: PRODUCT,
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: BASE_URL,
-  trustedOrigins: buildTrustedOrigins(),
   database: prismaAdapter(prisma, { provider: "postgresql" }),
-  // Disable BetterAuth's built-in rate limiter entirely. The magic-link plugin
-  // was silently throttling repeat sends to the same email, making the login
-  // form look successful (200) while actually skipping the email send. For
-  // a single-tenant Raven's deploy this is the right call. For multi-tenant
-  // we'll re-enable with sensible per-IP limits.
+  // Accept requests from the public domain and the preview URL, with or without
+  // the access prefix.
+  trustedOrigins: Array.from(
+    new Set(
+      [process.env.NEXT_PUBLIC_APP_URL, process.env.BETTER_AUTH_URL, BASE_URL, "http://localhost:3000"]
+        .filter(Boolean)
+        .flatMap((c) => {
+          const v = (c as string).replace(/\/$/, "");
+          try {
+            const u = new URL(v);
+            return [v, `${u.protocol}//${u.host}`];
+          } catch {
+            return [v];
+          }
+        }),
+    ),
+  ),
   rateLimit: { enabled: false },
   session: {
-    expiresIn: 60 * 60 * 24 * 30, // 30 days
-    updateAge: 60 * 60 * 24 * 7, // refresh weekly
-    cookieCache: { enabled: true, maxAge: 60 * 5 },
+    expiresIn: 60 * 60 * 24 * 30,
+    updateAge: 60 * 60 * 24 * 7,
   },
-  // CRITICAL: pin cookie attributes explicitly. With Next.js basePath in play,
-  // the verify endpoint lives at /r/<prefix>/api/auth/... — if Path isn't set
-  // to "/", the browser scopes the session cookie to that directory and it
-  // never reaches /r/<prefix>/dashboard. That's why post-click redirects keep
-  // landing on /login. A custom prefix also gives middleware a deterministic
-  // cookie name to look for.
+  // Pin cookie Path=/ so the session survives the redirect from
+  // /<prefix>/api/auth/... to /<prefix>/dashboard (the basePath gotcha).
   advanced: {
     cookiePrefix: "fabsheet",
     defaultCookieAttributes: {
@@ -106,41 +119,14 @@ export const auth = betterAuth({
   },
   plugins: [
     magicLink({
+      expiresIn: 15 * 60,
       sendMagicLink: async ({ email, url }) => {
-        const log = async (action: string, after: Record<string, unknown>) => {
-          try {
-            await prisma.auditLog.create({
-              data: { entityType: "Auth", entityId: email, action, after: after as object },
-            });
-          } catch { /* never block sign-in on logging */ }
-        };
-        await log("magic_link_invoked", { email, base: BASE_URL });
-        // Sweep any verification rows older than 30s for this email so future
-        // requests can never be blocked by stale tokens. We give BetterAuth's
-        // just-created row a 30s grace window so we don't nuke our own token.
-        try {
-          await prisma.verification.deleteMany({
-            where: { identifier: email, createdAt: { lt: new Date(Date.now() - 30_000) } },
-          });
-        } catch { /* never block sign-in */ }
-        if (!isAllowed(email)) {
-          console.log(`[auth] denied magic link for non-allowlisted email: ${email}`);
-          await log("magic_link_denied_allowlist", { email });
+        if (!allowlistOK(email)) {
+          console.log(`[auth] ${email} not allowlisted; skipping send.`);
           return;
         }
-        try {
-          await sendMagicLinkEmail(email, url);
-          await log("magic_link_sent", { email, url_host: new URL(url).host });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          await log("magic_link_send_failed", { email, message });
-          throw err;
-        }
+        await sendMagicLinkEmail(email, url);
       },
-      expiresIn: 15 * 60,
-      // Allow re-requesting a magic link without waiting for the previous one
-      // to expire. Cleaner UX, no "you must wait" silent failures.
-      disableSignUp: false,
     }),
   ],
 });
