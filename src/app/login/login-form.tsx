@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { signIn } from "@/lib/auth-client";
+import { requestMagicLink } from "@/lib/login-actions";
 import { Mail, Check, AlertTriangle } from "lucide-react";
 
 export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialError: string | null }) {
@@ -33,21 +33,14 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
       setError("Enter your email.");
       return;
     }
+    const callbackURL = absoluteCallback(nextUrl);
     startTransition(async () => {
-      try {
-        const res = await signIn.magicLink({ email, callbackURL: absoluteCallback(nextUrl) });
-        if (res && typeof res === "object" && "error" in res && res.error) {
-          // Surface BetterAuth's message so misconfig is obvious to the admin,
-          // but still tell the end user a generic line.
-          console.error("[login] BetterAuth error", res.error);
-          setError(`Could not send the link. (${(res.error as { message?: string }).message ?? "unknown error"})`);
-          return;
-        }
+      // Go through the server action (auth.api server-side), NOT the client SDK.
+      const res = await requestMagicLink(email, callbackURL);
+      if (res.ok) {
         setSent(true);
-      } catch (err) {
-        console.error("[login] signIn threw", err);
-        const msg = err instanceof Error ? err.message : "Network error.";
-        setError(`Could not send the link. (${msg})`);
+      } else {
+        setError(res.error ?? "Could not send the link.");
       }
     });
   }
