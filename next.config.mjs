@@ -1,15 +1,10 @@
-// Access-path prefix for single_tenant obscurity. Driven by ACCESS_PATH_PREFIX
-// at build time so the prefix is not hardcoded in source. With basePath set,
-// Next serves the app only under /<prefix>/... and returns 404 for bare paths,
-// and automatically prefixes every <Link>, asset, and redirect.
-const rawPrefix = (process.env.ACCESS_PATH_PREFIX || "").replace(/^\/+|\/+$/g, "");
-const usesPrefix = (process.env.APP_MODE || "single_tenant") === "single_tenant" && rawPrefix.length > 0;
-const basePath = usesPrefix ? `/${rawPrefix}` : undefined;
-
+// No basePath. The app is served at the domain root (fabsheet.org/dashboard).
+// Access control is BetterAuth (magic link + allowlist), not URL obscurity, so
+// the access-path prefix was removed to eliminate basePath/cookie/redirect
+// conflicts with auth.
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-  ...(basePath ? { basePath } : {}),
   experimental: {
     serverActions: {
       bodySizeLimit: "25mb",

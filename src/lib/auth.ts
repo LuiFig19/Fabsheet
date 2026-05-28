@@ -10,18 +10,15 @@ import { prisma } from "@/lib/db";
 
 const PRODUCT = process.env.NEXT_PUBLIC_APP_NAME || "FabSheet";
 
-/** Canonical app origin INCLUDING the access-path prefix. Prefers the public
- *  domain (fabsheet.org) over a Vercel preview URL so magic links + cookies all
- *  live on one host even if BETTER_AUTH_URL was never updated in Vercel. */
+/** Canonical app origin (no path prefix - the app is served at the domain
+ *  root). Prefers the public domain (fabsheet.org) over a Vercel preview URL so
+ *  magic links + cookies all live on one host even if BETTER_AUTH_URL was never
+ *  updated in Vercel. Strips any leftover /r/<prefix> from old env values. */
 function resolveBaseURL(): string {
-  const prefix = process.env.ACCESS_PATH_PREFIX
-    ? `/${process.env.ACCESS_PATH_PREFIX.replace(/^\/+|\/+$/g, "")}`
-    : "";
   const candidates = [process.env.NEXT_PUBLIC_APP_URL, process.env.BETTER_AUTH_URL]
     .filter(Boolean)
-    .map((c) => (c as string).replace(/\/$/, ""));
-  const chosen = candidates.find((c) => !c.includes("vercel.app")) ?? candidates[0] ?? "http://localhost:3000";
-  return chosen.endsWith(prefix) || prefix === "" ? chosen : chosen + prefix;
+    .map((c) => (c as string).replace(/\/$/, "").replace(/\/r\/[A-Za-z0-9_-]+$/, ""));
+  return candidates.find((c) => !c.includes("vercel.app")) ?? candidates[0] ?? "http://localhost:3000";
 }
 
 export const BASE_URL = resolveBaseURL();

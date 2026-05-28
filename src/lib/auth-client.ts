@@ -12,15 +12,12 @@ import { magicLinkClient } from "better-auth/client/plugins";
  * "TypeError: Failed to fetch" due to missing CORS headers on the 404).
  */
 function getBaseURL(): string {
+  // App is served at the domain root now (no access prefix). Use the live
+  // origin in the browser; fall back to env on the server.
   if (typeof window === "undefined") {
-    // Server-side (used by server actions calling auth.api). Falls back to env.
-    return process.env.NEXT_PUBLIC_APP_URL || "";
+    return (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/r\/[A-Za-z0-9_-]+$/, "");
   }
-  const origin = window.location.origin;
-  // If the page is served under a /r/<token>/ basePath, include it. Otherwise
-  // baseURL is just the origin.
-  const m = /^(\/r\/[A-Za-z0-9_-]+)(?:\/|$)/.exec(window.location.pathname);
-  return m ? origin + m[1] : origin;
+  return window.location.origin;
 }
 
 export const authClient = createAuthClient({

@@ -12,16 +12,12 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
 
-  // BetterAuth redirects to callbackURL after a successful magic-link click.
-  // We must include Next's basePath (the access prefix) or the browser lands
-  // on an unrouted path and shows a blank page. Build the absolute URL from
-  // the current location so prefix changes never break the redirect.
+  // Absolute callback URL for BetterAuth to redirect to after the magic-link
+  // click. App is served at the domain root now, so it's just origin + path.
   function absoluteCallback(path: string): string {
     if (typeof window === "undefined") return path;
-    const m = /^(\/r\/[A-Za-z0-9_-]+)(?:\/|$)/.exec(window.location.pathname);
-    const prefix = m ? m[1] : "";
     const clean = path.startsWith("/") ? path : `/${path}`;
-    return window.location.origin + prefix + clean;
+    return window.location.origin + clean;
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
