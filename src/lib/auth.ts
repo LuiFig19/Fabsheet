@@ -83,6 +83,21 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24 * 7, // refresh weekly
     cookieCache: { enabled: true, maxAge: 60 * 5 },
   },
+  // CRITICAL: pin cookie attributes explicitly. With Next.js basePath in play,
+  // the verify endpoint lives at /r/<prefix>/api/auth/... — if Path isn't set
+  // to "/", the browser scopes the session cookie to that directory and it
+  // never reaches /r/<prefix>/dashboard. That's why post-click redirects keep
+  // landing on /login. A custom prefix also gives middleware a deterministic
+  // cookie name to look for.
+  advanced: {
+    cookiePrefix: "fabsheet",
+    defaultCookieAttributes: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+    },
+  },
   user: {
     additionalFields: {
       tenantId: { type: "string", required: false },

@@ -10,7 +10,15 @@ const PUBLIC = ["/login", "/api/auth", "/api/diagnose", "/api/test-send", "/api/
 // We do NOT do the DB lookup in middleware (Edge runtime, no Prisma). Cookie
 // presence is enough for the redirect decision; the page+action layer does the
 // real auth check via auth.api.getSession().
-const SESSION_COOKIE = "better-auth.session_token";
+// Possible BetterAuth session-cookie names. We pinned the prefix to "fabsheet"
+// in lib/auth.ts, but keep the legacy "better-auth" variant so sessions from
+// older builds keep working through a redeploy.
+const SESSION_COOKIE_NAMES = [
+  "fabsheet.session_token",
+  "__Secure-fabsheet.session_token",
+  "better-auth.session_token",
+  "__Secure-better-auth.session_token",
+];
 
 export function middleware(req: NextRequest) {
   const mode = process.env.APP_MODE === "multi_tenant" ? "multi_tenant" : "single_tenant";
@@ -28,9 +36,7 @@ export function middleware(req: NextRequest) {
 
   if (isPublic) return NextResponse.next({ request: { headers } });
 
-  const hasSession =
-    req.cookies.get(SESSION_COOKIE)?.value ||
-    req.cookies.get("__Secure-" + SESSION_COOKIE)?.value;
+  const hasSession = SESSION_COOKIE_NAMES.some((n) => req.cookies.get(n)?.value);
   if (!hasSession) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
