@@ -2,10 +2,16 @@ import { prisma } from "@/lib/db";
 import { scopeWhere, type TenantContext } from "@/lib/tenant";
 
 export type Anomaly = {
-  kind: "long_day" | "silence" | "job_jump";
+  kind: "long_day" | "silence" | "job_jump" | "overlap";
   severity: "warn" | "info";
   message: string;
 };
+
+function toMin(t: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t ?? "");
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
 
 /**
  * Lightweight anomaly checks. Cheap to compute every dashboard load. None of
@@ -23,7 +29,13 @@ export async function detectAnomalies(ctx: TenantContext): Promise<Anomaly[]> {
   sinceTwoWeeks.setDate(sinceTwoWeeks.getDate() - 14);
   const recentEntries = await prisma.timesheetEntry.findMany({
     where: { ...s, status: "approved", upload: { date: { gte: sinceTwoWeeks } } },
-    select: { decimalHours: true, employee: { select: { name: true } }, upload: { select: { date: true } } },
+    select: {
+      decimalHours: true,
+      startTime: true,
+      endTime: true,
+      employee: { select: { name: true } },
+      upload: { select: { date: true } },
+    },
   });
   const byEmpDay = new Map<string, number>();
   for (const e of recentEntries) {
@@ -90,6 +102,35 @@ export async function detectAnomalies(ctx: TenantContext): Promise<Anomaly[]> {
         severity: "info",
         message: `Job ${j.workOrderNumber} (${j.customerName || "?"}) added ${r.toFixed(1)} h in the last 24h, +${Math.round((r / baseline) * 100)}% over prior ${baseline.toFixed(1)} h.`,
       });
+    }
+  }
+
+  // ---- Overlapping times: same employee, same day, two entries whose
+  //      start/end ranges overlap (double-logged hours). Pure data-integrity
+  //      check, no surveillance angle.
+  const byEmpDayEntries = new Map<string, { start: number; end: number }[]>();
+  for (const e of recentEntries) {
+    const start = toMin(e.startTime);
+    const end = toMin(e.endTime);
+    if (start == null || end == null || end <= start) continue;
+    const name = e.employee?.name ?? "Unknown";
+    const day = e.upload.date.toISOString().slice(0, 10);
+    const key = `${name}|${day}`;
+    if (!byEmpDayEntries.has(key)) byEmpDayEntries.set(key, []);
+    byEmpDayEntries.get(key)!.push({ start, end });
+  }
+  for (const [key, ranges] of byEmpDayEntries) {
+    ranges.sort((a, b) => a.start - b.start);
+    for (let i = 1; i < ranges.length; i++) {
+      if (ranges[i]!.start < ranges[i - 1]!.end) {
+        const [name, day] = key.split("|");
+        out.push({
+          kind: "overlap",
+          severity: "warn",
+          message: `${name} has overlapping time entries on ${day}. Two tasks share the same hours.`,
+        });
+        break; // one flag per employee-day is enough
+      }
     }
   }
 

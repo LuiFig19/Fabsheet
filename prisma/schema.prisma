@@ -184,6 +184,7 @@ model Job {
 
   @@index([tenantId])
   @@index([divisionId])
+  @@index([tenantId, status, workOrderNumber])
 }
 
 model TimesheetUpload {
@@ -209,6 +210,7 @@ model TimesheetUpload {
 
   @@index([tenantId])
   @@index([divisionId])
+  @@index([tenantId, status, createdAt])
 }
 
 model TimesheetEntry {
@@ -240,6 +242,11 @@ model TimesheetEntry {
 
   @@index([tenantId])
   @@index([divisionId])
+  // Real query paths: job rollups, employee rollups, status filters.
+  @@index([tenantId, jobId, status])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, status])
+  @@index([uploadId])
 }
 
 // Cache Claude Vision results by file hash so re-uploading the same image
@@ -267,4 +274,6 @@ model AuditLog {
   createdAt    DateTime @default(now())
 
   @@index([tenantId])
+  @@index([tenantId, entityType, entityId, createdAt])
+  @@index([tenantId, action, createdAt])
 }

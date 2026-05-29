@@ -89,6 +89,11 @@ export function ReportControls({
               <Download className="h-4 w-4" /> Download CSV
             </a>
           </Button>
+          <Button asChild variant="outline">
+            <a href={`/api/report/payroll-csv?${query}`}>
+              <Download className="h-4 w-4" /> Payroll CSV
+            </a>
+          </Button>
           <Button onClick={() => setEmailOpen(true)}>
             <Mail className="h-4 w-4" /> Email to...
           </Button>

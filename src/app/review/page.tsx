@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 import { getTenantContext, scopeWhere } from "@/lib/tenant";
+import { BulkApprove } from "./bulk-approve";
 import { AlertTriangle, ClipboardCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -31,10 +32,11 @@ export default async function ReviewQueuePage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="flex items-center gap-2 text-foreground">
             <AlertTriangle className="h-4 w-4 text-amber-500" /> Needs review ({needsReview.length})
           </CardTitle>
+          <BulkApprove disabled={needsReview.length === 0} />
         </CardHeader>
         <CardContent className="space-y-2">
           {needsReview.length === 0 ? (

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+        env:
+          # Build-time env so env.ts validation passes in CI. No real secrets.
+          DATABASE_URL: postgresql://u:p@localhost:5432/db
+          BETTER_AUTH_SECRET: ci-placeholder-secret-not-used-at-runtime
+          NEXT_PUBLIC_APP_NAME: FabSheet

@@ -335,3 +335,46 @@ export async function deleteRow(entryId: string) {
   await audit(ctx, "TimesheetEntry", entryId, "delete");
   revalidateAll();
 }
+
+/**
+ * Bulk-approve every needs_review upload that has ZERO flags — no extractor
+ * warnings and no per-row warnings. The manager only hand-reviews the sheets
+ * that actually need attention. Returns how many uploads were approved.
+ */
+export async function approveCleanUploads(): Promise<{ ok: true; approved: number } | { ok: false; error: string }> {
+  const ctx = await getTenantContext();
+  const s = scopeWhere(ctx);
+  const uploads = await prisma.timesheetUpload.findMany({
+    where: { ...s, status: "needs_review" },
+    include: { entries: { select: { confidenceByField: true } } },
+  });
+
+  const cleanIds: string[] = [];
+  for (const u of uploads) {
+    const warnings = Array.isArray(u.warnings) ? (u.warnings as unknown[]) : [];
+    if (warnings.length > 0) continue;
+    const hasRowWarning = u.entries.some((e) => {
+      const cby = (e.confidenceByField as Record<string, unknown> | null) ?? {};
+      return Array.isArray(cby._warnings) && (cby._warnings as unknown[]).length > 0;
+    });
+    if (hasRowWarning) continue;
+    if (u.entries.length === 0) continue;
+    cleanIds.push(u.id);
+  }
+
+  if (cleanIds.length === 0) return { ok: true, approved: 0 };
+
+  await prisma.$transaction([
+    prisma.timesheetEntry.updateMany({
+      where: { uploadId: { in: cleanIds }, status: { not: "approved" } },
+      data: { status: "approved", approvedAt: new Date() },
+    }),
+    prisma.timesheetUpload.updateMany({
+      where: { id: { in: cleanIds } },
+      data: { status: "approved" },
+    }),
+  ]);
+  await audit(ctx, "TimesheetUpload", "bulk", "approve_clean", { count: cleanIds.length });
+  revalidateAll();
+  return { ok: true, approved: cleanIds.length };
+}
