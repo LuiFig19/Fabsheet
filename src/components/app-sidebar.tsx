@@ -11,6 +11,7 @@ import {
   ClipboardCheck,
   Briefcase,
   FileText,
+  Target,
   Settings,
   Menu,
   Search,
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/review", label: "Review", icon: ClipboardCheck },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/production", label: "Production", icon: Target },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -76,7 +78,7 @@ export function AppSidebar({
 }) {
   const pathname = usePathname();
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
       <SidebarHeader company={company} />
       <div className="flex-1 overflow-y-auto">
         <NavList pathname={pathname} />

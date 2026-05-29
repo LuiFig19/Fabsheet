@@ -15,6 +15,7 @@ import {
   ClipboardCheck,
   Briefcase,
   FileText,
+  Target,
   Settings,
   Download,
   LogOut,
@@ -55,6 +56,7 @@ export function CommandMenu() {
           <CommandItem onSelect={() => go("/upload")}><Upload className="h-4 w-4" /> Upload timesheet</CommandItem>
           <CommandItem onSelect={() => go("/review")}><ClipboardCheck className="h-4 w-4" /> Review queue</CommandItem>
           <CommandItem onSelect={() => go("/jobs")}><Briefcase className="h-4 w-4" /> Jobs</CommandItem>
+          <CommandItem onSelect={() => go("/production")}><Target className="h-4 w-4" /> Production breakdown</CommandItem>
           <CommandItem onSelect={() => go("/reports")}><FileText className="h-4 w-4" /> Reports</CommandItem>
           <CommandItem onSelect={() => go("/settings")}><Settings className="h-4 w-4" /> Settings</CommandItem>
         </CommandGroup>

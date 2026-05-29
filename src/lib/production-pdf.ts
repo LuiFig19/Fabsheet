@@ -1,0 +1,125 @@
+import PDFDocument from "pdfkit";
+import type { ProductionBreakdown } from "@/lib/production";
+
+const NAVY = "#1f2a44";
+const GRAY = "#6b7280";
+const LINE = "#d1d5db";
+const RED = "#b91c1c";
+const GREEN = "#047857";
+
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// Content area: 36 .. 576 (LETTER 612 - 36 margins).
+const NAME_X = 36;
+const NAME_W = 104;
+const DAY_X = 144; // first day column
+const DAY_W = 44;
+const TOTAL_X = DAY_X + DAY_W * 7; // 452
+const TOTAL_W = 56;
+const STATUS_X = TOTAL_X + TOTAL_W; // 508
+const STATUS_W = 68;
+const RIGHT = 576;
+
+/**
+ * Per-week, per-employee Mon-Sun productive-hours grid with weekly total and
+ * status. Under-target employees get a reasons footnote. Built with pdfkit to
+ * match the existing report PDF style.
+ */
+export async function renderProductionPdf(data: ProductionBreakdown, companyName: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "LETTER", margin: 36, bufferPages: true });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c: Buffer) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const bottom = 740;
+    const ensureSpace = (need: number) => {
+      if (doc.y + need > bottom) doc.addPage();
+    };
+
+    // Header
+    doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(18).text(companyName, 36, 36);
+    doc.fillColor(GRAY).font("Helvetica").fontSize(8).text("Production breakdown", 36, 58);
+    doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(13).text("Productive hours by employee", 36, 76);
+    doc
+      .fillColor(GRAY)
+      .font("Helvetica")
+      .fontSize(9)
+      .text(`${data.startLabel} to ${data.endLabel}  .  target ${data.target} h/employee/week  .  approved hours only`, 36, 94);
+    doc.y = 116;
+
+    const drawColHeader = () => {
+      const y = doc.y;
+      doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(7);
+      doc.text("Employee", NAME_X, y, { width: NAME_W });
+      DAY_LABELS.forEach((d, i) => {
+        doc.text(d, DAY_X + i * DAY_W, y, { width: DAY_W, align: "right" });
+      });
+      doc.text("Prod", TOTAL_X, y, { width: TOTAL_W, align: "right" });
+      doc.text("Status", STATUS_X, y, { width: STATUS_W, align: "right" });
+      doc.moveTo(36, y + 11).lineTo(RIGHT, y + 11).strokeColor(LINE).lineWidth(0.5).stroke();
+      doc.y = y + 15;
+    };
+
+    const statusWord = { under: "Under", met: "On", over: "Over" } as const;
+
+    for (const w of data.weeks) {
+      ensureSpace(60);
+      const gy = doc.y;
+      doc.rect(36, gy, RIGHT - 36, 16).fill(NAVY);
+      doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(9).text(`Week of ${w.weekStart} - ${w.weekEndLabel}`, 40, gy + 4, { width: 360 });
+      doc.text(`${w.totalProductive.toFixed(2)} h prod`, TOTAL_X - 40, gy + 4, { width: TOTAL_W + 40, align: "right" });
+      doc.y = gy + 20;
+
+      drawColHeader();
+
+      const underNotes: { name: string; reasons: string[] }[] = [];
+
+      for (const emp of w.employees) {
+        ensureSpace(15);
+        const y = doc.y;
+        doc.font("Helvetica").fontSize(8).fillColor("#1f2937");
+        doc.text(emp.name, NAME_X, y, { width: NAME_W });
+        emp.days.forEach((d, i) => {
+          const txt = d.hasEntries ? d.productive.toFixed(1) : d.isWorkday ? "-" : "";
+          doc.fillColor(d.isWorkday && !d.hasEntries ? RED : "#1f2937");
+          doc.text(txt, DAY_X + i * DAY_W, y, { width: DAY_W, align: "right" });
+        });
+        doc.fillColor("#1f2937").font("Helvetica-Bold").text(emp.productive.toFixed(2), TOTAL_X, y, { width: TOTAL_W, align: "right" });
+        doc.fillColor(emp.status === "under" ? RED : GREEN).text(statusWord[emp.status], STATUS_X, y, { width: STATUS_W, align: "right" });
+        doc.font("Helvetica").fillColor("#1f2937");
+        doc.y = y + 13;
+        doc.moveTo(36, doc.y - 2).lineTo(RIGHT, doc.y - 2).strokeColor("#eef0f3").lineWidth(0.5).stroke();
+
+        if (emp.status === "under" && emp.reasons.length) underNotes.push({ name: emp.name, reasons: emp.reasons });
+      }
+
+      if (underNotes.length) {
+        ensureSpace(20);
+        doc.y += 4;
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(NAVY).text("Under-target notes", 36, doc.y);
+        doc.y += 2;
+        doc.font("Helvetica").fontSize(7.5).fillColor("#374151");
+        for (const u of underNotes) {
+          ensureSpace(14);
+          doc.text(`${u.name}: ${u.reasons.join("  .  ")}`, 40, doc.y, { width: RIGHT - 44 });
+          doc.y += 2;
+        }
+      }
+      doc.y += 14;
+    }
+
+    // Footer on every page
+    const range = doc.bufferedPageRange();
+    const generatedAt = new Date().toLocaleString("en-US");
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.font("Helvetica").fontSize(7).fillColor(GRAY);
+      doc.text(`Generated ${generatedAt}`, 36, 756, { width: 300 });
+      doc.text(`Generated by ${companyName} Timesheets`, 276, 756, { width: 300, align: "right" });
+    }
+
+    doc.end();
+  });
+}

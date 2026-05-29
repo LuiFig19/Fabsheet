@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   Briefcase,
   FileText,
+  Target,
   Settings,
   Menu,
   X,
@@ -22,6 +23,7 @@ const LINKS: Link[] = [
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/review", label: "Review", icon: ClipboardCheck },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/production", label: "Production", icon: Target },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

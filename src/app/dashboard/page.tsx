@@ -123,17 +123,19 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      <ProductionGoalCard
-        target={productionTarget}
-        productive={productiveThisWeek}
-        support={supportThisWeek}
-        pct={productivePct}
-        remaining={remainingHours}
-        perDay={perDay}
-        daysRemaining={daysRemaining}
-        onWeekend={onWeekend}
-        onTrack={onTrack}
-      />
+      <Link href="/production" className="block">
+        <ProductionGoalCard
+          target={productionTarget}
+          productive={productiveThisWeek}
+          support={supportThisWeek}
+          pct={productivePct}
+          remaining={remainingHours}
+          perDay={perDay}
+          daysRemaining={daysRemaining}
+          onWeekend={onWeekend}
+          onTrack={onTrack}
+        />
+      </Link>
 
       {anomalies.length > 0 && (
         <Card className="border-amber-300">
@@ -283,10 +285,19 @@ function ProductionGoalCard({
         : `Need ${fmtHours(remaining)} more production hours by Friday - ${fmtHours(perDay)} h/day across ${daysRemaining} working day${daysRemaining === 1 ? "" : "s"} left.`;
 
   return (
-    <Card className={tier === "red" ? "border-red-300" : tier === "yellow" ? "border-amber-300" : "border-emerald-300"}>
+    <Card
+      className={`transition-shadow hover:shadow-md ${
+        tier === "red" ? "border-red-300" : tier === "yellow" ? "border-amber-300" : "border-emerald-300"
+      }`}
+    >
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-foreground">
-          <Target className="h-4 w-4" /> Weekly production goal
+        <CardTitle className="flex items-center justify-between gap-2 text-foreground">
+          <span className="flex items-center gap-2">
+            <Target className="h-4 w-4" /> Weekly production goal
+          </span>
+          <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+            Per-employee breakdown <ArrowRight className="h-3.5 w-3.5" />
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
