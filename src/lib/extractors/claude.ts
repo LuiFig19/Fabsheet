@@ -6,6 +6,7 @@ import {
   type ExtractorUsage,
   type TimesheetExtractor,
 } from "./types";
+import { mergeScans } from "./merge";
 import { VISION_SYSTEM_PROMPT, TIMESHEET_TOOL } from "./claudeVisionPrompt";
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -55,13 +56,15 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
 
   private client: Anthropic;
   private model: string;
+  private doubleScan: boolean;
 
-  constructor(apiKey: string, model: string) {
+  constructor(apiKey: string, model: string, doubleScan = true) {
     if (!apiKey) {
       throw new Error("ANTHROPIC_API_KEY is not set. Add it in Settings to enable Claude Vision OCR.");
     }
     this.client = new Anthropic({ apiKey });
     this.model = model;
+    this.doubleScan = doubleScan;
   }
 
   private buildSource(file: Buffer, mimeType: string): Record<string, unknown> {
@@ -76,7 +79,43 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
     return { type: "image", source: { type: "base64", media_type: "image/jpeg", data } };
   }
 
+  /**
+   * Public entry point. With double-scan enabled (default) the same image is
+   * read twice in independent calls and the two readings are reconciled: fields
+   * that agree get a small confidence boost, fields that disagree are kept at a
+   * low confidence so the Review screen flags them for a human. This catches
+   * the handwriting the model is genuinely unsure about instead of silently
+   * trusting one pass. If the second pass errors we fall back to the first.
+   */
   async extract(file: Buffer, mimeType: string): Promise<ExtractedTimesheet> {
+    const first = await this.scanOnce(file, mimeType);
+    if (!this.doubleScan) {
+      this.lastUsage = { inputTokens: first.inputTokens, outputTokens: first.outputTokens, model: this.model };
+      return first.result;
+    }
+
+    let second: ScanResult | null = null;
+    try {
+      second = await this.scanOnce(file, mimeType);
+    } catch {
+      second = null; // a flaky second pass must never sink a good first read
+    }
+
+    if (!second) {
+      this.lastUsage = { inputTokens: first.inputTokens, outputTokens: first.outputTokens, model: this.model };
+      return first.result;
+    }
+
+    this.lastUsage = {
+      inputTokens: first.inputTokens + second.inputTokens,
+      outputTokens: first.outputTokens + second.outputTokens,
+      model: this.model,
+    };
+    return mergeScans(first.result, second.result);
+  }
+
+  /** One full read (with the existing single-retry-on-invalid-schema loop). */
+  private async scanOnce(file: Buffer, mimeType: string): Promise<ScanResult> {
     const source = this.buildSource(file, mimeType);
 
     const baseUserContent = [
@@ -111,7 +150,6 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
 
       inputTokens += resp.usage.input_tokens;
       outputTokens += resp.usage.output_tokens;
-      this.lastUsage = { inputTokens, outputTokens, model: this.model };
 
       const toolUse = resp.content.find((b) => b.type === "tool_use" && b.name === TIMESHEET_TOOL.name);
       if (!toolUse || toolUse.type !== "tool_use") {
@@ -120,10 +158,12 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
       }
 
       const parsed = extractedTimesheetSchema.safeParse(toolUse.input);
-      if (parsed.success) return parsed.data;
+      if (parsed.success) return { result: parsed.data, inputTokens, outputTokens };
       lastError = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     }
 
     throw new Error(`Claude Vision returned data that did not match the V5 schema after a retry. ${lastError}`);
   }
 }
+
+type ScanResult = { result: ExtractedTimesheet; inputTokens: number; outputTokens: number };

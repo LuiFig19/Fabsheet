@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, fmtHours } from "@/lib/utils";
 import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
 import type { EmployeeBreakdown, WeekBreakdown } from "@/lib/production";
@@ -49,6 +50,8 @@ export function ProductionBreakdownView({
           </Select>
         </label>
       </div>
+
+      <ColorLegend />
 
       {weeks.map((w) => (
         <WeekSection key={w.weekStart} week={w} target={target} sort={sort} filter={filter} showHeader={!singleWeek} />
@@ -121,10 +124,17 @@ function EmployeeRow({ emp, target }: { emp: EmployeeBreakdown; target: number }
   return (
     <Card className={cn(under ? "border-red-200" : "border-border")}>
       <CardContent className="p-0">
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-3 p-4 text-left hover:bg-muted/40"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setOpen((v) => !v);
+            }
+          }}
+          className="flex w-full cursor-pointer items-center gap-3 p-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-expanded={open}
         >
           <span className="text-muted-foreground">
@@ -133,7 +143,27 @@ function EmployeeRow({ emp, target }: { emp: EmployeeBreakdown; target: number }
 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold">{emp.name}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help font-semibold underline decoration-dotted decoration-muted-foreground/50 underline-offset-4">
+                    {emp.name}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="start" className="w-60 p-0">
+                  <div className="border-b bg-muted/40 px-3 py-2 text-sm font-semibold">{emp.name}</div>
+                  <div className="px-3 py-2.5">
+                    <StatLine dot="bg-emerald-500" label="Production" value={emp.productive} valueClass="text-emerald-600" />
+                    <StatLine dot="bg-amber-500" label="Non-production" value={emp.nonProductive} valueClass="text-amber-600" />
+                    <div className="mt-1.5 border-t pt-1.5">
+                      <StatLine dot="bg-foreground" label="Total hours" value={emp.total} valueClass="font-semibold text-foreground" bold />
+                    </div>
+                    <div className="mt-2 text-[11px] text-muted-foreground">
+                      Target {target} h production / week.{" "}
+                      {under ? `${fmtHours(emp.shortfall)} h short.` : over ? `${fmtHours(emp.productive - target)} h over (fine).` : "On target."}
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
               <Badge variant={under ? "danger" : "success"} className="gap-1">
                 {under ? <AlertTriangle className="h-3 w-3" /> : over ? <TrendingUp className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
                 {STATUS_LABEL[emp.status]}
@@ -152,14 +182,14 @@ function EmployeeRow({ emp, target }: { emp: EmployeeBreakdown; target: number }
 
           <div className="shrink-0 text-right">
             <div className="text-lg font-bold tabular-nums">
-              {fmtHours(emp.productive)}
+              <span className="text-emerald-600">{fmtHours(emp.productive)}</span>
               <span className="text-sm font-normal text-muted-foreground"> / {target} h</span>
             </div>
             {emp.nonProductive > 0 && (
-              <div className="text-xs text-muted-foreground tabular-nums">+{fmtHours(emp.nonProductive)} h non-prod</div>
+              <div className="text-xs tabular-nums text-amber-600">+{fmtHours(emp.nonProductive)} h non-prod</div>
             )}
           </div>
-        </button>
+        </div>
 
         {open && (
           <div className="border-t px-4 py-4">
@@ -182,6 +212,53 @@ function EmployeeRow({ emp, target }: { emp: EmployeeBreakdown; target: number }
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function StatLine({
+  dot,
+  label,
+  value,
+  valueClass,
+  bold,
+}: {
+  dot: string;
+  label: string;
+  value: number;
+  valueClass: string;
+  bold?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-0.5 text-sm">
+      <span className="flex items-center gap-2">
+        <span className={cn("inline-block h-2.5 w-2.5 rounded-full", dot)} aria-hidden />
+        <span className={cn("text-muted-foreground", bold && "font-medium text-foreground")}>{label}</span>
+      </span>
+      <span className={cn("tabular-nums", valueClass)}>{fmtHours(value)} h</span>
+    </div>
+  );
+}
+
+function ColorLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border bg-card px-3 py-2 text-xs">
+      <span className="font-semibold text-foreground">Hours color key</span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" aria-hidden />
+        <span className="text-emerald-600">Production</span>
+        <span className="text-muted-foreground">- counts toward the 40 h target</span>
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
+        <span className="text-amber-600">Non-production</span>
+        <span className="text-muted-foreground">- machine repair, forklift, wash, admin</span>
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-foreground" aria-hidden />
+        <span className="text-foreground">Total</span>
+      </span>
+      <span className="text-muted-foreground">Hover a name for that person&apos;s split.</span>
+    </div>
   );
 }
 

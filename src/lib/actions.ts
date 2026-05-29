@@ -32,6 +32,7 @@ function revalidateAll() {
   revalidatePath("/review");
   revalidatePath("/jobs");
   revalidatePath("/reports");
+  revalidatePath("/production");
 }
 
 export type UploadResult =

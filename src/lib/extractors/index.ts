@@ -41,7 +41,11 @@ async function getExtractor(): Promise<TimesheetExtractor> {
   const choice = (process.env.EXTRACTOR ?? "claude").toLowerCase();
   if (choice === "mock") return new MockExtractor();
   const key = await resolveAnthropicKey();
-  return new ClaudeVisionExtractor(key, model());
+  // Double-scan (read each sheet twice and reconcile) is ON unless explicitly
+  // disabled. Trades ~2x Vision cost for materially better accuracy + better
+  // flagging of uncertain handwriting.
+  const doubleScan = (process.env.OCR_DOUBLE_SCAN ?? "true").toLowerCase() !== "false";
+  return new ClaudeVisionExtractor(key, model(), doubleScan);
 }
 
 function startOfToday(): Date {

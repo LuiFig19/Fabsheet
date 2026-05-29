@@ -27,6 +27,9 @@ const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
   DAILY_OCR_CAP: z.coerce.number().int().positive().default(100),
+  // Read each sheet twice and reconcile for accuracy. ON by default; set
+  // "false" to halve Vision cost at the expense of accuracy.
+  OCR_DOUBLE_SCAN: z.enum(["true", "false"]).default("true"),
 
   // Storage (optional; disk fallback when absent)
   R2_ACCOUNT_ID: z.string().optional(),

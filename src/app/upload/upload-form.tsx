@@ -26,6 +26,19 @@ type Item = {
 const MAX_BYTES = 2 * 1024 * 1024;
 const CONCURRENCY = 3;
 
+// Keep the screen awake during a batch so the phone doesn't sleep mid-upload
+// (which can pause the network request on mobile). Best-effort: unsupported
+// browsers just no-op. Re-acquires if the OS drops the lock when the tab is
+// briefly hidden and then refocused.
+type WakeLockSentinelLike = { release: () => Promise<void>; released?: boolean };
+function getWakeLockApi(): { request: (type: "screen") => Promise<WakeLockSentinelLike> } | null {
+  if (typeof navigator === "undefined") return null;
+  const nav = navigator as Navigator & {
+    wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> };
+  };
+  return nav.wakeLock ?? null;
+}
+
 export function UploadForm() {
   const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
@@ -96,6 +109,22 @@ export function UploadForm() {
   async function runAll() {
     const queue = items.filter((it) => it.phase === "queued" || it.phase === "error");
     if (queue.length === 0) return;
+
+    // Hold a screen wake lock for the duration of the batch.
+    const wakeApi = getWakeLockApi();
+    let wakeLock: WakeLockSentinelLike | null = null;
+    const acquire = async (): Promise<WakeLockSentinelLike | null> => {
+      if (!wakeApi) return null;
+      try { return await wakeApi.request("screen"); } catch { return null; }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && (!wakeLock || wakeLock.released)) {
+        void acquire().then((s) => { if (s) wakeLock = s; });
+      }
+    };
+    wakeLock = await acquire();
+    document.addEventListener("visibilitychange", onVisible);
+
     const cursor = { i: 0 };
     let ok = 0;
     let fail = 0;
@@ -106,8 +135,14 @@ export function UploadForm() {
         if (r.ok) ok++; else fail++;
       }
     }
-    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker());
-    await Promise.all(workers);
+    try {
+      const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker());
+      await Promise.all(workers);
+    } finally {
+      document.removeEventListener("visibilitychange", onVisible);
+      try { await wakeLock?.release(); } catch { /* ignore */ }
+    }
+
     if (ok > 0) toast.success(`Read ${ok} timesheet${ok === 1 ? "" : "s"}` + (fail > 0 ? `, ${fail} failed` : ""));
     if (fail > 0 && ok === 0) toast.error(`${fail} timesheet${fail === 1 ? "" : "s"} failed to read`);
     // Route to the review queue so the manager sees the whole batch
