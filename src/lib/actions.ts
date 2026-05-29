@@ -14,6 +14,7 @@ import {
 } from "@/lib/mapping";
 import { computeDecimalHours } from "@/lib/utils";
 import { putUpload } from "@/lib/storage";
+import { limitUpload } from "@/lib/rate-limit";
 import { getTenantContext, scopeWhere, scopeStamp, tenantWhere, type TenantContext } from "@/lib/tenant";
 
 // maxDuration is set on the calling route (src/app/upload/page.tsx) because
@@ -48,6 +49,14 @@ export type UploadResult =
  */
 export async function uploadAndExtract(formData: FormData): Promise<UploadResult> {
   const ctx = await getTenantContext();
+
+  // Rate limit: 30 uploads / 10 min keyed by user (falls back to tenant when
+  // auth is disabled). No-ops if Upstash isn't configured.
+  const limit = await limitUpload(ctx.user?.id ?? ctx.tenant.id);
+  if (!limit.ok) {
+    const mins = Math.ceil(limit.retryAfterSec / 60);
+    return { ok: false, error: `Upload limit reached. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` };
+  }
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {

@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
+import { limitMagicLink } from "@/lib/rate-limit";
 
 export type MagicLinkResult = { ok: boolean; error?: string };
 
@@ -16,6 +17,11 @@ export type MagicLinkResult = { ok: boolean; error?: string };
 export async function requestMagicLink(email: string, callbackURL: string): Promise<MagicLinkResult> {
   const clean = email.trim().toLowerCase();
   if (!clean) return { ok: false, error: "Enter your email." };
+  const limit = await limitMagicLink(clean);
+  if (!limit.ok) {
+    const mins = Math.ceil(limit.retryAfterSec / 60);
+    return { ok: false, error: `Too many sign-in requests. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` };
+  }
   try {
     // BetterAuth's API surface name has varied across versions; prefer the
     // documented one and fall back if needed.

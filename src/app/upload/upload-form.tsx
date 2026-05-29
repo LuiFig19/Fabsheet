@@ -3,7 +3,6 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import imageCompression from "browser-image-compression";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { uploadAndExtract } from "@/lib/actions";
@@ -72,6 +71,8 @@ export function UploadForm() {
     let f = it.file;
     if (f.type.startsWith("image/") && f.size > MAX_BYTES) {
       try {
+        // Lazy-load: keeps browser-image-compression out of the initial bundle.
+        const imageCompression = (await import("browser-image-compression")).default;
         f = await imageCompression(f, { maxWidthOrHeight: 1920, maxSizeMB: 1.5, useWebWorker: true });
       } catch { /* fall back to original */ }
     }
