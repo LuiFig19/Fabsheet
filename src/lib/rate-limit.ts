@@ -1,45 +1,47 @@
-import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
+import { prisma } from "@/lib/db";
 
 /**
- * Rate limiting via Upstash Redis. If the Upstash env vars are not set, every
- * check returns ok (no-op) so local dev and partially-configured deploys keep
- * working. Sliding-window limits per the security spec:
+ * Fixed-window rate limiting backed by Postgres (the DB we already run) — no
+ * paid Redis required. Per the security spec:
  *   - magic-link requests: 5 per email per 10 minutes
  *   - uploads:            30 per user per 10 minutes
+ *
+ * A DB hiccup never blocks a legitimate action (fails open). Concurrency races
+ * at this scale (a couple of office users) are irrelevant — the window resets
+ * cleanly and the cap is approximate by design.
  */
-const url = process.env.UPSTASH_REDIS_REST_URL;
-const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-const redis = url && token ? new Redis({ url, token }) : null;
-
-export const rateLimitEnabled = redis !== null;
-
-const magicLinkLimiter = redis
-  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(5, "10 m"), prefix: "rl:magiclink", analytics: false })
-  : null;
-
-const uploadLimiter = redis
-  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(30, "10 m"), prefix: "rl:upload", analytics: false })
-  : null;
-
 export type LimitResult = { ok: true } | { ok: false; retryAfterSec: number };
 
-async function check(limiter: Ratelimit | null, key: string): Promise<LimitResult> {
-  if (!limiter) return { ok: true };
+const WINDOW_MS = 10 * 60 * 1000;
+
+async function check(prefix: string, id: string, limit: number): Promise<LimitResult> {
+  const key = `${prefix}:${id}`;
+  const now = new Date();
   try {
-    const r = await limiter.limit(key);
-    if (r.success) return { ok: true };
-    return { ok: false, retryAfterSec: Math.max(1, Math.ceil((r.reset - Date.now()) / 1000)) };
-  } catch {
-    // Never block a legitimate action if Redis is briefly unreachable.
+    const existing = await prisma.rateLimit.findUnique({ where: { key } });
+    if (!existing || existing.expiresAt < now) {
+      // New or expired window: start fresh at 1.
+      await prisma.rateLimit.upsert({
+        where: { key },
+        create: { key, count: 1, expiresAt: new Date(now.getTime() + WINDOW_MS) },
+        update: { count: 1, expiresAt: new Date(now.getTime() + WINDOW_MS) },
+      });
+      return { ok: true };
+    }
+    if (existing.count >= limit) {
+      return { ok: false, retryAfterSec: Math.max(1, Math.ceil((existing.expiresAt.getTime() - now.getTime()) / 1000)) };
+    }
+    await prisma.rateLimit.update({ where: { key }, data: { count: { increment: 1 } } });
     return { ok: true };
+  } catch {
+    return { ok: true }; // fail open
   }
 }
 
 export function limitMagicLink(email: string): Promise<LimitResult> {
-  return check(magicLinkLimiter, email.trim().toLowerCase());
+  return check("magiclink", email.trim().toLowerCase(), 5);
 }
 
 export function limitUpload(userKey: string): Promise<LimitResult> {
-  return check(uploadLimiter, userKey);
+  return check("upload", userKey, 30);
 }

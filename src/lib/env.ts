@@ -42,10 +42,6 @@ const schema = z.object({
   // Cron
   CRON_SECRET: z.string().optional(),
 
-  // Rate limiting (Upstash). Both required together; absent = limiting off.
-  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
-  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
-
   // Public
   NEXT_PUBLIC_APP_NAME: z.string().default("FabSheet"),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),

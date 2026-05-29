@@ -110,6 +110,14 @@ model Verification {
   @@index([identifier])
 }
 
+// Fixed-window rate limiting on the DB we already run (no paid Redis needed).
+// One row per limiter key; resets when the window expires.
+model RateLimit {
+  key       String   @id
+  count     Int      @default(0)
+  expiresAt DateTime
+}
+
 // Per-tenant operational config (thresholds, caps, keys, report defaults).
 // One row per tenant. Branding/identity is on Tenant.
 model Company {
