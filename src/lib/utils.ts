@@ -105,6 +105,33 @@ export function toDateInputValue(d: Date | string): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * Current calendar date + hour in Raven's local timezone (Eastern). Shop ops
+ * (the daily "did everyone submit?" check, the 6 PM cutoff) should never key
+ * off server-UTC time or browser-local time.
+ */
+const SHOP_TIMEZONE = "America/New_York";
+export function easternNow(now: Date = new Date()): { dateIso: string; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SHOP_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return { dateIso: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) };
+}
+
+/** UTC range that covers a YYYY-MM-DD calendar day. Used to match upload.date
+ *  values (stored at noon UTC). */
+export function utcDayBounds(dateIso: string): { start: Date; end: Date } {
+  const start = new Date(`${dateIso}T00:00:00.000Z`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
 /** Budget usage color tier per spec: green <75%, yellow 75-100%, red >100%. */
 export function budgetTier(used: number, budget: number): "green" | "yellow" | "red" | "none" {
   if (!budget || budget <= 0) return "none";

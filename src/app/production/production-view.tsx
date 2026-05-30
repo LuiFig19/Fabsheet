@@ -145,9 +145,7 @@ function EmployeeRow({ emp, target }: { emp: EmployeeBreakdown; target: number }
             <div className="flex flex-wrap items-center gap-2">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="cursor-help font-semibold underline decoration-dotted decoration-muted-foreground/50 underline-offset-4">
-                    {emp.name}
-                  </span>
+                  <span className="font-semibold">{emp.name}</span>
                 </TooltipTrigger>
                 <TooltipContent side="top" align="start" className="w-60 p-0">
                   <div className="border-b bg-muted/40 px-3 py-2 text-sm font-semibold">{emp.name}</div>
@@ -257,7 +255,7 @@ function ColorLegend() {
         <span className="inline-block h-2.5 w-2.5 rounded-full bg-foreground" aria-hidden />
         <span className="text-foreground">Total</span>
       </span>
-      <span className="text-muted-foreground">Hover a name for that person&apos;s split.</span>
+      <span className="text-muted-foreground">Click a row to see the daily breakdown.</span>
     </div>
   );
 }

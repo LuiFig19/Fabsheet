@@ -8,14 +8,20 @@ import { approvedHoursByJob } from "@/lib/queries";
 import { getTenantContext, scopeWhere, tenantWhere } from "@/lib/tenant";
 import {
   budgetTier,
+  easternNow,
   fmtHours,
   formatDate,
+  utcDayBounds,
   workWeekProgress,
   productiveCodeWhere,
   nonProductiveCodeWhere,
 } from "@/lib/utils";
 import { detectAnomalies } from "@/lib/anomalies";
-import { Upload, ClipboardCheck, AlertTriangle, ArrowRight, Target } from "lucide-react";
+import { SendDailyHrButton } from "./send-daily-hr-button";
+import { Upload, ClipboardCheck, AlertTriangle, ArrowRight, CalendarCheck, CalendarX, Target } from "lucide-react";
+
+const DAILY_HR_RECIPIENT = "luismain190@gmail.com";
+const HR_CUTOFF_HOUR = 18; // 6 PM Eastern
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +29,10 @@ export default async function DashboardPage() {
   const ctx = await getTenantContext();
   const s = scopeWhere(ctx);
   const { weekStart, weekEnd, daysRemaining, onWeekend } = workWeekProgress();
+  const today = easternNow();
+  const todayBounds = utcDayBounds(today.dateIso);
 
-  const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company, anomalies, multiUnitEntries] = await Promise.all([
+  const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company, anomalies, multiUnitEntries, activeEmployees, todayUploads] = await Promise.all([
     prisma.job.findMany({ where: { ...s, status: "active" }, orderBy: { workOrderNumber: "asc" } }),
     approvedHoursByJob(ctx),
     // Productive = direct fab work (see PRODUCTIVE_CODES in lib/utils).
@@ -53,7 +61,22 @@ export default async function DashboardPage() {
       where: { ...s, status: "approved", jobId: { not: null }, unitNumber: { not: null }, job: { quantity: { gt: 1 } } },
       select: { jobId: true, unitNumber: true, decimalHours: true },
     }),
+    // For the "Today's submissions" card.
+    prisma.employee.findMany({
+      where: { ...s, active: true },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.timesheetUpload.findMany({
+      where: { ...s, date: { gte: todayBounds.start, lt: todayBounds.end } },
+      select: { id: true, employeeId: true },
+    }),
   ]);
+
+  const submittedToday = new Set(todayUploads.map((u) => u.employeeId).filter((id): id is string => !!id));
+  const missingToday = activeEmployees.filter((e) => !submittedToday.has(e.id));
+  const submittedCount = activeEmployees.length - missingToday.length;
+  const afterCutoff = today.hour >= HR_CUTOFF_HOUR;
 
   // Build a per-job, per-unit hours map for the multi-unit cards.
   const unitHoursByJob = new Map<string, Map<number, number>>();
@@ -122,6 +145,16 @@ export default async function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      <TodaySubmissionsCard
+        dateIso={today.dateIso}
+        hour={today.hour}
+        afterCutoff={afterCutoff}
+        totalActive={activeEmployees.length}
+        submittedCount={submittedCount}
+        missing={missingToday}
+        recipient={DAILY_HR_RECIPIENT}
+      />
 
       <Link href="/production" className="block">
         <ProductionGoalCard
@@ -257,6 +290,75 @@ export default async function DashboardPage() {
       </Card>
     </div>
   );
+}
+
+function TodaySubmissionsCard({
+  dateIso,
+  hour,
+  afterCutoff,
+  totalActive,
+  submittedCount,
+  missing,
+  recipient,
+}: {
+  dateIso: string;
+  hour: number;
+  afterCutoff: boolean;
+  totalActive: number;
+  submittedCount: number;
+  missing: { id: string; name: string }[];
+  recipient: string;
+}) {
+  const allIn = missing.length === 0 && totalActive > 0;
+  const alarm = afterCutoff && missing.length > 0;
+  const borderTone = allIn ? "border-emerald-300" : alarm ? "border-red-300" : "border-amber-300";
+  const Icon = allIn ? CalendarCheck : CalendarX;
+  const iconTone = allIn ? "text-emerald-600" : alarm ? "text-red-600" : "text-amber-600";
+
+  return (
+    <Card className={borderTone}>
+      <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="flex items-center gap-2 text-foreground">
+          <Icon className={`h-4 w-4 ${iconTone}`} /> Today&apos;s submissions . {dateIso}
+        </CardTitle>
+        <SendDailyHrButton recipient={recipient} />
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
+          <span className="text-2xl font-bold tabular-nums">
+            {submittedCount}
+            <span className="text-base font-normal text-muted-foreground"> / {totalActive} submitted</span>
+          </span>
+          {missing.length > 0 ? (
+            <span className={`font-medium ${alarm ? "text-red-700" : "text-amber-700"}`}>{missing.length} missing</span>
+          ) : (
+            totalActive > 0 && <span className="font-medium text-emerald-700">Everyone in.</span>
+          )}
+        </div>
+
+        {missing.length > 0 && (
+          <div className="text-sm">
+            <span className="text-muted-foreground">Missing today: </span>
+            <span className={alarm ? "font-medium text-red-800" : "text-foreground"}>
+              {missing.map((m) => m.name).join(", ")}
+            </span>
+          </div>
+        )}
+
+        <div className="text-xs text-muted-foreground">
+          {afterCutoff
+            ? `Past the 6 PM Eastern cutoff (now ${formatHour(hour)}). Anyone listed above did not turn in a sheet for today.`
+            : `6 PM Eastern cutoff has not passed yet (now ${formatHour(hour)}). Some welders may still be turning in sheets.`}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatHour(h: number): string {
+  const ampm = h >= 12 ? "PM" : "AM";
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display} ${ampm}`;
 }
 
 function StatusBadge({ status }: { status: string }) {

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { decryptSecret } from "@/lib/crypto";
 import { runExtraction } from "@/lib/extractors";
 import {
   entriesFromExtraction,
@@ -12,10 +13,11 @@ import {
   codeFromBubble,
   validateUnit,
 } from "@/lib/mapping";
-import { computeDecimalHours } from "@/lib/utils";
+import { computeDecimalHours, easternNow, utcDayBounds } from "@/lib/utils";
 import { putUpload } from "@/lib/storage";
 import { limitUpload } from "@/lib/rate-limit";
 import { getTenantContext, scopeWhere, scopeStamp, tenantWhere, type TenantContext } from "@/lib/tenant";
+import { buildDailySummaryCsv, buildQuickbooksCsv, type DailyEntry } from "@/lib/daily-report";
 
 // maxDuration is set on the calling route (src/app/upload/page.tsx) because
 // "use server" files only allow async function exports.
@@ -347,6 +349,29 @@ export async function deleteRow(entryId: string) {
 }
 
 /**
+ * Delete an entire upload (denies a sheet that shouldn't have been submitted).
+ * Cascade deletes its entries via the schema relation. The stored file/R2 blob
+ * is intentionally left in place: it's cheap, and keeping the OCR cache hit
+ * means a re-upload of the same image doesn't re-bill Vision.
+ */
+export async function deleteUpload(uploadId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ctx = await getTenantContext();
+  const upload = await prisma.timesheetUpload.findFirst({
+    where: { id: uploadId, ...scopeWhere(ctx) },
+    select: { id: true, status: true, employeeId: true, date: true },
+  });
+  if (!upload) return { ok: false, error: "Upload not found." };
+  await prisma.timesheetUpload.delete({ where: { id: upload.id } });
+  await audit(ctx, "TimesheetUpload", uploadId, "delete", {
+    priorStatus: upload.status,
+    employeeId: upload.employeeId,
+    date: upload.date,
+  });
+  revalidateAll();
+  return { ok: true };
+}
+
+/**
  * Bulk-approve every needs_review upload that has ZERO flags — no extractor
  * warnings and no per-row warnings. The manager only hand-reviews the sheets
  * that actually need attention. Returns how many uploads were approved.
@@ -387,4 +412,119 @@ export async function approveCleanUploads(): Promise<{ ok: true; approved: numbe
   await audit(ctx, "TimesheetUpload", "bulk", "approve_clean", { count: cleanIds.length });
   revalidateAll();
   return { ok: true, approved: cleanIds.length };
+}
+
+// HR recipient for the daily timesheet packet. Hardcoded for the Monday demo —
+// move to Company.defaultEmailTo / a per-tenant Settings field once HR confirms
+// the real address.
+const DAILY_HR_RECIPIENT = "luismain190@gmail.com";
+
+export type DailyHrEmailResult =
+  | { ok: true; dateIso: string; entryCount: number; approvedCount: number; uploadCount: number; recipient: string; mode: "sent" | "logged" }
+  | { ok: false; error: string };
+
+/**
+ * One-button daily packet to HR. Pulls every entry from today's uploads (work
+ * day in shop-local Eastern time), builds a QuickBooks-importable CSV
+ * (approved entries only) plus a human-readable summary CSV (per-employee
+ * totals + every entry with status), and emails them as attachments. If
+ * RESEND_API_KEY isn't set, logs a "would send" instead of failing — useful
+ * for demos before the integration is wired.
+ */
+export async function sendDailyHrEmail(): Promise<DailyHrEmailResult> {
+  const ctx = await getTenantContext();
+  const company = await prisma.company.findFirst({ where: tenantWhere(ctx) });
+  const tenantName = ctx.tenant.displayName || ctx.tenant.name || company?.name || "FabSheet";
+
+  const { dateIso } = easternNow();
+  const { start, end } = utcDayBounds(dateIso);
+
+  const rawEntries = await prisma.timesheetEntry.findMany({
+    where: { ...scopeWhere(ctx), upload: { date: { gte: start, lt: end } } },
+    select: {
+      decimalHours: true,
+      laborCode: true,
+      description: true,
+      startTime: true,
+      endTime: true,
+      notes: true,
+      workOrderNumber: true,
+      customerName: true,
+      status: true,
+      employee: { select: { name: true } },
+      upload: { select: { id: true, date: true } },
+      job: { select: { workOrderNumber: true, customerName: true } },
+    },
+    orderBy: [{ employee: { name: "asc" } }, { startTime: "asc" }],
+  });
+
+  if (rawEntries.length === 0) {
+    return { ok: false, error: `No timesheet entries found for ${dateIso}. Nothing to send.` };
+  }
+
+  const uploadIds = new Set(rawEntries.map((e) => e.upload.id));
+  const entries: DailyEntry[] = rawEntries.map((e) => ({
+    date: e.upload.date.toISOString().slice(0, 10),
+    employee: e.employee?.name ?? "Unknown",
+    workOrder: e.workOrderNumber,
+    customer: e.job?.customerName || e.customerName || "",
+    laborCode: e.laborCode,
+    description: e.description,
+    startTime: e.startTime,
+    endTime: e.endTime,
+    hours: e.decimalHours,
+    status: e.status,
+    notes: e.notes,
+  }));
+
+  const approvedCount = entries.filter((e) => e.status === "approved").length;
+  const qbCsv = buildQuickbooksCsv(entries);
+  const summaryCsv = buildDailySummaryCsv(entries, dateIso, tenantName);
+
+  const qbName = `qb-time-${dateIso}.csv`;
+  const summaryName = `daily-summary-${dateIso}.csv`;
+
+  const subject = `${tenantName} daily timesheets - ${dateIso}`;
+  const text = [
+    `${tenantName} daily timesheet packet for ${dateIso}.`,
+    `${approvedCount} approved entr${approvedCount === 1 ? "y" : "ies"} of ${entries.length} total, across ${uploadIds.size} upload${uploadIds.size === 1 ? "" : "s"}.`,
+    "",
+    `Attached:`,
+    `  - ${qbName}: QuickBooks Time Activities import (approved entries only).`,
+    `  - ${summaryName}: Human summary (per-employee totals + every entry with status). Opens in Excel.`,
+    "",
+    `Sent automatically by FabSheet.`,
+  ].join("\n");
+
+  // Resend setup mirrors emailReport: env wins, otherwise the encrypted
+  // Company.resendKeyEnc, otherwise log a "would send" instead of failing.
+  const apiKey = process.env.RESEND_API_KEY || decryptSecret(company?.resendKeyEnc);
+  const from = process.env.RESEND_FROM || company?.resendFrom || `${tenantName} <onboarding@resend.dev>`;
+
+  if (!apiKey) {
+    console.log(`[email] would send "${subject}" to ${DAILY_HR_RECIPIENT} (${qbCsv.length}+${summaryCsv.length} bytes). Set RESEND_API_KEY to actually send.`);
+    await audit(ctx, "TimesheetUpload", "daily", "hr_email_logged", { date: dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size });
+    return { ok: true, dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipient: DAILY_HR_RECIPIENT, mode: "logged" };
+  }
+
+  try {
+    const { Resend } = await import("resend");
+    const resend = new Resend(apiKey);
+    const { error } = await resend.emails.send({
+      from,
+      to: [DAILY_HR_RECIPIENT],
+      subject,
+      text,
+      attachments: [
+        { filename: qbName, content: Buffer.from(qbCsv, "utf8").toString("base64") },
+        { filename: summaryName, content: Buffer.from(summaryCsv, "utf8").toString("base64") },
+      ],
+    });
+    if (error) return { ok: false, error: `Resend error: ${error.message}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to send email." };
+  }
+
+  await audit(ctx, "TimesheetUpload", "daily", "hr_email_sent", { date: dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipient: DAILY_HR_RECIPIENT });
+  return { ok: true, dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipient: DAILY_HR_RECIPIENT, mode: "sent" };
 }

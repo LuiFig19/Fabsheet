@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 import { getTenantContext, scopeWhere } from "@/lib/tenant";
 import { BulkApprove } from "./bulk-approve";
+import { DeleteUploadButton } from "./delete-upload-button";
 import { AlertTriangle, ClipboardCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -60,15 +61,16 @@ export default async function ReviewQueuePage() {
 }
 
 function Row({ u }: { u: { id: string; status: string; date: Date; employee: { name: string } | null; _count: { entries: number } } }) {
+  const employeeName = u.employee?.name ?? "Unknown";
   return (
     <div className="flex items-center justify-between rounded-md border p-3">
       <div>
-        <div className="text-sm font-medium">{u.employee?.name ?? "Unknown"}</div>
+        <div className="text-sm font-medium">{employeeName}</div>
         <div className="text-xs text-muted-foreground">
           {formatDate(u.date)} . {u._count.entries} row{u._count.entries === 1 ? "" : "s"}
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         {u.status === "approved" ? (
           <Badge variant="success">approved</Badge>
         ) : u.status === "uploaded" ? (
@@ -81,6 +83,7 @@ function Row({ u }: { u: { id: string; status: string; date: Date; employee: { n
             <ClipboardCheck className="h-4 w-4" /> Open
           </Link>
         </Button>
+        <DeleteUploadButton uploadId={u.id} employee={employeeName} />
       </div>
     </div>
   );
