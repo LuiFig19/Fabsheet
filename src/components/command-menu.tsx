@@ -16,6 +16,7 @@ import {
   Briefcase,
   FileText,
   Target,
+  AlertTriangle,
   Settings,
   Download,
   LogOut,
@@ -53,6 +54,7 @@ export function CommandMenu() {
         <CommandEmpty>No results.</CommandEmpty>
         <CommandGroup heading="Go to">
           <CommandItem onSelect={() => go("/dashboard")}><LayoutDashboard className="h-4 w-4" /> Dashboard</CommandItem>
+          <CommandItem onSelect={() => go("/attention")}><AlertTriangle className="h-4 w-4" /> Needs Attention</CommandItem>
           <CommandItem onSelect={() => go("/upload")}><Upload className="h-4 w-4" /> Upload timesheet</CommandItem>
           <CommandItem onSelect={() => go("/review")}><ClipboardCheck className="h-4 w-4" /> Review queue</CommandItem>
           <CommandItem onSelect={() => go("/jobs")}><Briefcase className="h-4 w-4" /> Jobs</CommandItem>

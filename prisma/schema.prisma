@@ -143,6 +143,9 @@ model Employee {
   tenantId   String?
   divisionId String?
   name       String
+  // Per-employee email for the daily HR-packet dropdown. Blank means
+  // "no email on file" - the UI disables that recipient option.
+  email      String            @default("")
   active     Boolean           @default(true)
   createdAt  DateTime          @default(now())
   uploads    TimesheetUpload[]

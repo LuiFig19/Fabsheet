@@ -16,11 +16,10 @@ import {
   productiveCodeWhere,
   nonProductiveCodeWhere,
 } from "@/lib/utils";
-import { detectAnomalies } from "@/lib/anomalies";
-import { SendDailyHrButton } from "./send-daily-hr-button";
-import { Upload, ClipboardCheck, AlertTriangle, ArrowRight, CalendarCheck, CalendarX, Target } from "lucide-react";
+import { ProductionGoalCard } from "@/components/production-goal-card";
+import { EmailToOfficeDropdown, type RosterMember } from "./email-to-office-dropdown";
+import { Upload, ClipboardCheck, AlertTriangle, ArrowRight, CalendarCheck, CalendarX } from "lucide-react";
 
-const DAILY_HR_RECIPIENT = "luismain190@gmail.com";
 const HR_CUTOFF_HOUR = 18; // 6 PM Eastern
 
 export const dynamic = "force-dynamic";
@@ -32,7 +31,7 @@ export default async function DashboardPage() {
   const today = easternNow();
   const todayBounds = utcDayBounds(today.dateIso);
 
-  const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company, anomalies, multiUnitEntries, activeEmployees, todayUploads] = await Promise.all([
+  const [jobs, usedByJob, productiveAgg, supportAgg, jobsInProgress, needsReviewCount, recent, company, multiUnitEntries, activeEmployees, todayUploads] = await Promise.all([
     prisma.job.findMany({ where: { ...s, status: "active" }, orderBy: { workOrderNumber: "asc" } }),
     approvedHoursByJob(ctx),
     // Productive = direct fab work (see PRODUCTIVE_CODES in lib/utils).
@@ -54,17 +53,16 @@ export default async function DashboardPage() {
       include: { employee: true, _count: { select: { entries: true } } },
     }),
     prisma.company.findFirst({ where: tenantWhere(ctx) }),
-    detectAnomalies(ctx),
     // Approved entry hours per (jobId, unitNumber) for multi-unit jobs only,
     // so the dashboard job cards can render mini per-unit bars.
     prisma.timesheetEntry.findMany({
       where: { ...s, status: "approved", jobId: { not: null }, unitNumber: { not: null }, job: { quantity: { gt: 1 } } },
       select: { jobId: true, unitNumber: true, decimalHours: true },
     }),
-    // For the "Today's submissions" card.
+    // For the "Today's submissions" card + the EmailToOffice roster.
     prisma.employee.findMany({
       where: { ...s, active: true },
-      select: { id: true, name: true },
+      select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     }),
     prisma.timesheetUpload.findMany({
@@ -77,6 +75,8 @@ export default async function DashboardPage() {
   const missingToday = activeEmployees.filter((e) => !submittedToday.has(e.id));
   const submittedCount = activeEmployees.length - missingToday.length;
   const afterCutoff = today.hour >= HR_CUTOFF_HOUR;
+  const roster: RosterMember[] = activeEmployees.map((e) => ({ id: e.id, name: e.name, hasEmail: e.email.trim().length > 0 }));
+  const officeReady = (company?.defaultEmailTo ?? "").trim().length > 0;
 
   // Build a per-job, per-unit hours map for the multi-unit cards.
   const unitHoursByJob = new Map<string, Map<number, number>>();
@@ -146,16 +146,6 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      <TodaySubmissionsCard
-        dateIso={today.dateIso}
-        hour={today.hour}
-        afterCutoff={afterCutoff}
-        totalActive={activeEmployees.length}
-        submittedCount={submittedCount}
-        missing={missingToday}
-        recipient={DAILY_HR_RECIPIENT}
-      />
-
       <Link href="/production" className="block">
         <ProductionGoalCard
           target={productionTarget}
@@ -169,26 +159,6 @@ export default async function DashboardPage() {
           onTrack={onTrack}
         />
       </Link>
-
-      {anomalies.length > 0 && (
-        <Card className="border-amber-300">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-amber-900">
-              <AlertTriangle className="h-4 w-4" /> Needs attention ({anomalies.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {anomalies.map((a, i) => (
-              <div key={i} className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm">
-                <Badge variant={a.severity === "warn" ? "warning" : "muted"} className="shrink-0">
-                  {a.kind.replace("_", " ")}
-                </Badge>
-                <span className="text-amber-950">{a.message}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
 
       <div>
         <div className="mb-3 flex items-center justify-between">
@@ -265,17 +235,17 @@ export default async function DashboardPage() {
             <p className="py-6 text-center text-sm text-muted-foreground">No uploads yet.</p>
           ) : (
             recent.map((u) => (
-              <div key={u.id} className="flex items-center justify-between rounded-md border p-3">
-                <div className="flex items-center gap-3">
-                  {u.status === "needs_review" && <AlertTriangle className="h-4 w-4 text-amber-500" />}
-                  <div>
-                    <div className="text-sm font-medium">{u.employee?.name ?? "Unknown"}</div>
+              <div key={u.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  {u.status === "needs_review" && <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />}
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{u.employee?.name ?? "Unknown"}</div>
                     <div className="text-xs text-muted-foreground">
                       {formatDate(u.date)} . {u._count.entries} row{u._count.entries === 1 ? "" : "s"}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-2 sm:gap-3">
                   <StatusBadge status={u.status} />
                   {u.status !== "extracting" && (
                     <Button asChild size="sm" variant="ghost">
@@ -288,6 +258,17 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      <TodaySubmissionsCard
+        dateIso={today.dateIso}
+        hour={today.hour}
+        afterCutoff={afterCutoff}
+        totalActive={activeEmployees.length}
+        submittedCount={submittedCount}
+        missing={missingToday}
+        roster={roster}
+        officeReady={officeReady}
+      />
     </div>
   );
 }
@@ -299,7 +280,8 @@ function TodaySubmissionsCard({
   totalActive,
   submittedCount,
   missing,
-  recipient,
+  roster,
+  officeReady,
 }: {
   dateIso: string;
   hour: number;
@@ -307,7 +289,8 @@ function TodaySubmissionsCard({
   totalActive: number;
   submittedCount: number;
   missing: { id: string; name: string }[];
-  recipient: string;
+  roster: RosterMember[];
+  officeReady: boolean;
 }) {
   const allIn = missing.length === 0 && totalActive > 0;
   const alarm = afterCutoff && missing.length > 0;
@@ -317,11 +300,14 @@ function TodaySubmissionsCard({
 
   return (
     <Card className={borderTone}>
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="flex items-center gap-2 text-foreground">
-          <Icon className={`h-4 w-4 ${iconTone}`} /> Today&apos;s submissions . {dateIso}
+      <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-2">
+        <CardTitle className="flex min-w-0 items-center gap-2 text-foreground">
+          <Icon className={`h-4 w-4 shrink-0 ${iconTone}`} />
+          <span className="truncate">Today&apos;s submissions . {dateIso}</span>
         </CardTitle>
-        <SendDailyHrButton recipient={recipient} />
+        <div className="shrink-0">
+          <EmailToOfficeDropdown roster={roster} officeReady={officeReady} />
+        </div>
       </CardHeader>
       <CardContent className="space-y-2">
         <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
@@ -368,65 +354,3 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="warning">needs review</Badge>;
 }
 
-function ProductionGoalCard({
-  target, productive, support, pct, remaining, perDay, daysRemaining, onWeekend, onTrack,
-}: {
-  target: number; productive: number; support: number; pct: number;
-  remaining: number; perDay: number; daysRemaining: number; onWeekend: boolean; onTrack: boolean;
-}) {
-  // Visual tier mirrors the job-progress colors.
-  const tier: "green" | "yellow" | "red" =
-    onTrack ? "green" : pct >= 75 ? "yellow" : daysRemaining <= 2 ? "red" : "yellow";
-  const bar = tier === "green" ? "bg-emerald-500" : tier === "yellow" ? "bg-amber-500" : "bg-red-500";
-  const headline = onTrack
-    ? `Target hit - ${fmtHours(productive - target)} h over the line.`
-    : onWeekend
-      ? `Work week is over. ${remaining > 0 ? `Missed by ${fmtHours(remaining)} h.` : "Goal hit."} Next week starts Monday at 0 / ${target}.`
-      : daysRemaining === 0
-        ? `End of Friday. ${remaining > 0 ? `Short ${fmtHours(remaining)} h on this week.` : "Goal hit."}`
-        : `Need ${fmtHours(remaining)} more production hours by Friday - ${fmtHours(perDay)} h/day across ${daysRemaining} working day${daysRemaining === 1 ? "" : "s"} left.`;
-
-  return (
-    <Card
-      className={`transition-shadow hover:shadow-md ${
-        tier === "red" ? "border-red-300" : tier === "yellow" ? "border-amber-300" : "border-emerald-300"
-      }`}
-    >
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between gap-2 text-foreground">
-          <span className="flex items-center gap-2">
-            <Target className="h-4 w-4" /> Weekly production goal
-          </span>
-          <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
-            Per-employee breakdown <ArrowRight className="h-3.5 w-3.5" />
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <div className="text-2xl font-bold tabular-nums sm:text-3xl">
-            {fmtHours(productive)}
-            <span className="text-base font-normal text-muted-foreground"> / {target} h</span>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {fmtHours(support)} h non-production this week (machine repair, forklift, wash, admin)
-          </div>
-        </div>
-
-        <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className={`h-full rounded-full ${bar} transition-all`}
-            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge variant={tier === "green" ? "success" : tier === "yellow" ? "warning" : "danger"}>
-            {Math.round(pct)}%
-          </Badge>
-          <span className={tier === "red" ? "font-medium text-red-700" : "text-foreground"}>{headline}</span>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}

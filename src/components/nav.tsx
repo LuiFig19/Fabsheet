@@ -11,6 +11,7 @@ import {
   Briefcase,
   FileText,
   Target,
+  AlertTriangle,
   Settings,
   Menu,
   X,
@@ -20,6 +21,7 @@ type Link = { href: string; label: string; icon: typeof LayoutDashboard; exact?:
 
 const LINKS: Link[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/attention", label: "Needs Attention", icon: AlertTriangle },
   { href: "/upload", label: "Upload", icon: Upload },
   { href: "/review", label: "Review", icon: ClipboardCheck },
   { href: "/jobs", label: "Jobs", icon: Briefcase },

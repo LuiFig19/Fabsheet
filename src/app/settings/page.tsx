@@ -10,6 +10,7 @@ import {
   addEmployee,
   addLaborCode,
   saveKeys,
+  setEmployeeEmail,
   toggleDescription,
   toggleEmployee,
   toggleLaborCode,
@@ -184,12 +185,8 @@ export default async function SettingsPage() {
 
       {/* Reference data */}
       <div className="grid gap-6 lg:grid-cols-3">
-        <ListCard
-          title={`Employees (${employees.filter((e) => e.active).length} active)`}
-          addAction={addEmployee}
-          addFields={[{ name: "name", placeholder: "New employee" }]}
-          items={employees.map((e) => ({ id: e.id, label: e.name, active: e.active }))}
-          toggleAction={toggleEmployee}
+        <EmployeeListCard
+          employees={employees.map((e) => ({ id: e.id, name: e.name, email: e.email, active: e.active }))}
         />
         <ListCard
           title={`Labor codes (${codes.filter((c) => c.active).length} active)`}
@@ -231,6 +228,59 @@ function Usage({ label, value, warn }: { label: string; value: string; warn?: bo
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={`text-xl font-bold tabular-nums ${warn ? "text-amber-600" : ""}`}>{value}</div>
     </div>
+  );
+}
+
+/**
+ * Employees get their own card so each row has an editable email field. The
+ * "Email to ..." dropdown on the dashboard pulls from these addresses; a blank
+ * email disables that recipient in the dropdown.
+ */
+function EmployeeListCard({
+  employees,
+}: {
+  employees: { id: string; name: string; email: string; active: boolean }[];
+}) {
+  const activeCount = employees.filter((e) => e.active).length;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-foreground">Employees ({activeCount} active)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <form action={addEmployee} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <Input name="name" placeholder="New employee" />
+          <Input name="email" type="email" placeholder="email (optional)" />
+          <Button type="submit" size="sm">Add</Button>
+        </form>
+        <ul className="max-h-80 space-y-1 overflow-y-auto text-sm">
+          {employees.map((e) => (
+            <li key={e.id} className="space-y-1 rounded border px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className={e.active ? "font-medium" : "text-muted-foreground line-through"}>{e.name}</span>
+                <form action={toggleEmployee}>
+                  <input type="hidden" name="id" value={e.id} />
+                  <button type="submit" className="shrink-0 text-xs text-muted-foreground underline hover:text-foreground">
+                    {e.active ? "deactivate" : "activate"}
+                  </button>
+                </form>
+              </div>
+              <form action={setEmployeeEmail} className="flex gap-1">
+                <input type="hidden" name="id" value={e.id} />
+                <Input
+                  name="email"
+                  type="email"
+                  defaultValue={e.email}
+                  placeholder="email (used by Email to dropdown)"
+                  className="h-8 text-xs"
+                />
+                <Button type="submit" size="sm" variant="outline" className="h-8 text-xs">Save</Button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 

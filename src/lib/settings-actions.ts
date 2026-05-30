@@ -83,9 +83,11 @@ export async function saveKeys(formData: FormData) {
 export async function addEmployee(formData: FormData) {
   const ctx = await getTenantContext();
   const name = String(formData.get("name") ?? "").trim();
-  if (name) await prisma.employee.create({ data: { ...scopeStamp(ctx), name } });
+  const email = String(formData.get("email") ?? "").trim();
+  if (name) await prisma.employee.create({ data: { ...scopeStamp(ctx), name, email } });
   revalidatePath("/settings");
   revalidatePath("/upload");
+  revalidatePath("/dashboard");
 }
 
 export async function toggleEmployee(formData: FormData) {
@@ -94,6 +96,19 @@ export async function toggleEmployee(formData: FormData) {
   const e = await prisma.employee.findFirst({ where: { id, tenantId: ctx.tenant.id } });
   if (e) await prisma.employee.update({ where: { id }, data: { active: !e.active } });
   revalidatePath("/settings");
+  revalidatePath("/dashboard");
+}
+
+/** Set or clear the email address on one employee. Used by the recipient
+ *  dropdown so the demo doesn't depend on a separate roster file. */
+export async function setEmployeeEmail(formData: FormData) {
+  const ctx = await getTenantContext();
+  const id = String(formData.get("id"));
+  const email = String(formData.get("email") ?? "").trim();
+  const e = await prisma.employee.findFirst({ where: { id, tenantId: ctx.tenant.id } });
+  if (e) await prisma.employee.update({ where: { id }, data: { email } });
+  revalidatePath("/settings");
+  revalidatePath("/dashboard");
 }
 
 export async function addLaborCode(formData: FormData) {

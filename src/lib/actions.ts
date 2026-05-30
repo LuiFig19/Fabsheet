@@ -414,27 +414,63 @@ export async function approveCleanUploads(): Promise<{ ok: true; approved: numbe
   return { ok: true, approved: cleanIds.length };
 }
 
-// HR recipient for the daily timesheet packet. Hardcoded for the Monday demo —
-// move to Company.defaultEmailTo / a per-tenant Settings field once HR confirms
-// the real address.
-const DAILY_HR_RECIPIENT = "luismain190@gmail.com";
+// Last-resort fallback when both Settings -> Company -> Default report
+// recipients AND the user's Office choice are blank. Keeps the demo button
+// working until HR confirms the real address.
+const DAILY_HR_FALLBACK = "luismain190@gmail.com";
+
+export type DailyRecipient =
+  | { kind: "office" }
+  | { kind: "employee"; employeeId: string };
 
 export type DailyHrEmailResult =
-  | { ok: true; dateIso: string; entryCount: number; approvedCount: number; uploadCount: number; recipient: string; mode: "sent" | "logged" }
+  | {
+      ok: true;
+      dateIso: string;
+      entryCount: number;
+      approvedCount: number;
+      uploadCount: number;
+      recipientLabel: string;
+      mode: "sent" | "logged";
+    }
   | { ok: false; error: string };
 
 /**
- * One-button daily packet to HR. Pulls every entry from today's uploads (work
- * day in shop-local Eastern time), builds a QuickBooks-importable CSV
- * (approved entries only) plus a human-readable summary CSV (per-employee
- * totals + every entry with status), and emails them as attachments. If
- * RESEND_API_KEY isn't set, logs a "would send" instead of failing — useful
- * for demos before the integration is wired.
+ * One-button daily packet for today's timesheets. Recipient comes from the
+ * dashboard dropdown:
+ *  - office: Company.defaultEmailTo (fallback DAILY_HR_FALLBACK).
+ *  - employee: Employee.email for that id.
+ * The label returned never contains the raw address, so the UI can confirm
+ * "Sent to <label>" without leaking emails in toasts.
+ *
+ * Builds a QuickBooks-importable CSV (approved entries only) plus a human
+ * summary CSV (per-employee totals + every entry with status), and emails them
+ * as attachments. If RESEND_API_KEY isn't set, logs a "would send" instead of
+ * failing.
  */
-export async function sendDailyHrEmail(): Promise<DailyHrEmailResult> {
+export async function sendDailyHrEmail(recipient: DailyRecipient = { kind: "office" }): Promise<DailyHrEmailResult> {
   const ctx = await getTenantContext();
   const company = await prisma.company.findFirst({ where: tenantWhere(ctx) });
   const tenantName = ctx.tenant.displayName || ctx.tenant.name || company?.name || "FabSheet";
+
+  // Resolve recipient address + label, never echoing the address back in the
+  // result.
+  let recipientLabel = "Office";
+  let toAddresses: string[] = [];
+  if (recipient.kind === "office") {
+    const officeCsv = (company?.defaultEmailTo ?? "").trim();
+    toAddresses = officeCsv ? officeCsv.split(",").map((s) => s.trim()).filter(Boolean) : [DAILY_HR_FALLBACK];
+    recipientLabel = "Office";
+  } else {
+    const emp = await prisma.employee.findFirst({
+      where: { id: recipient.employeeId, ...scopeWhere(ctx) },
+      select: { name: true, email: true },
+    });
+    if (!emp) return { ok: false, error: "Recipient not found." };
+    if (!emp.email.trim()) return { ok: false, error: `${emp.name} has no email on file. Set it in Settings.` };
+    toAddresses = [emp.email.trim()];
+    recipientLabel = emp.name;
+  }
 
   const { dateIso } = easternNow();
   const { start, end } = utcDayBounds(dateIso);
@@ -502,9 +538,9 @@ export async function sendDailyHrEmail(): Promise<DailyHrEmailResult> {
   const from = process.env.RESEND_FROM || company?.resendFrom || `${tenantName} <onboarding@resend.dev>`;
 
   if (!apiKey) {
-    console.log(`[email] would send "${subject}" to ${DAILY_HR_RECIPIENT} (${qbCsv.length}+${summaryCsv.length} bytes). Set RESEND_API_KEY to actually send.`);
-    await audit(ctx, "TimesheetUpload", "daily", "hr_email_logged", { date: dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size });
-    return { ok: true, dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipient: DAILY_HR_RECIPIENT, mode: "logged" };
+    console.log(`[email] would send "${subject}" to ${toAddresses.join(", ")} (${qbCsv.length}+${summaryCsv.length} bytes). Set RESEND_API_KEY to actually send.`);
+    await audit(ctx, "TimesheetUpload", "daily", "hr_email_logged", { date: dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipientLabel });
+    return { ok: true, dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipientLabel, mode: "logged" };
   }
 
   try {
@@ -512,7 +548,7 @@ export async function sendDailyHrEmail(): Promise<DailyHrEmailResult> {
     const resend = new Resend(apiKey);
     const { error } = await resend.emails.send({
       from,
-      to: [DAILY_HR_RECIPIENT],
+      to: toAddresses,
       subject,
       text,
       attachments: [
@@ -525,6 +561,6 @@ export async function sendDailyHrEmail(): Promise<DailyHrEmailResult> {
     return { ok: false, error: err instanceof Error ? err.message : "Failed to send email." };
   }
 
-  await audit(ctx, "TimesheetUpload", "daily", "hr_email_sent", { date: dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipient: DAILY_HR_RECIPIENT });
-  return { ok: true, dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipient: DAILY_HR_RECIPIENT, mode: "sent" };
+  await audit(ctx, "TimesheetUpload", "daily", "hr_email_sent", { date: dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipientLabel });
+  return { ok: true, dateIso, entryCount: entries.length, approvedCount, uploadCount: uploadIds.size, recipientLabel, mode: "sent" };
 }
