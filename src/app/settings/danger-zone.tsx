@@ -67,12 +67,12 @@ export function DangerZone({ counts }: { counts: Counts }) {
   }
 
   return (
-    <Card className="border-red-300 bg-red-50/40">
+    <Card className="border-destructive/50 bg-destructive/5">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-red-900">
+        <CardTitle className="flex items-center gap-2 text-destructive">
           <AlertTriangle className="h-4 w-4" /> Danger zone
         </CardTitle>
-        <p className="text-xs text-red-900/70">
+        <p className="text-xs text-destructive/80">
           These actions delete data and cannot be undone. Each prompts before running.
         </p>
       </CardHeader>
@@ -116,7 +116,7 @@ export function DangerZone({ counts }: { counts: Counts }) {
           onClick={() => ask("keys")}
           disabled={pending || !counts.hasStoredKeys}
         />
-        <div className="border-t border-red-200 pt-3">
+        <div className="border-t border-destructive/30 pt-3">
           <Row
             title="Clear EVERYTHING"
             desc="The nuclear option. Deletes timesheets, jobs, employees, codes, descriptions, stored keys, and the audit log. The company itself stays so you remain logged in."
@@ -136,7 +136,7 @@ export function DangerZone({ counts }: { counts: Counts }) {
           <div
             className={`flex items-start gap-2 rounded-md border p-2 text-sm ${
               flash.ok
-                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                ? "border-emerald-400/60 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
                 : "border-destructive/40 bg-destructive/10 text-destructive"
             }`}
           >
@@ -149,7 +149,7 @@ export function DangerZone({ counts }: { counts: Counts }) {
       <dialog
         ref={dialogRef}
         onClose={() => setConfirm(null)}
-        className="w-[min(440px,92vw)] rounded-lg p-0 backdrop:bg-black/40"
+        className="w-[min(440px,92vw)] rounded-lg border border-border bg-card p-0 text-card-foreground shadow-lg backdrop:bg-black/50"
       >
         {confirm && (
           <div className="space-y-4 p-5">
@@ -233,9 +233,9 @@ function Row({
   severe?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-red-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-md border border-destructive/30 bg-card text-card-foreground p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
-        <div className={`text-sm font-semibold ${severe ? "text-red-700" : ""}`}>{title}</div>
+        <div className={`text-sm font-semibold ${severe ? "text-destructive" : "text-card-foreground"}`}>{title}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{desc}</div>
         <div className="mt-1.5 flex flex-wrap gap-1">
           {counts.map((c) => (

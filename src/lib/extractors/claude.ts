@@ -88,30 +88,39 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
    * trusting one pass. If the second pass errors we fall back to the first.
    */
   async extract(file: Buffer, mimeType: string): Promise<ExtractedTimesheet> {
-    const first = await this.scanOnce(file, mimeType);
     if (!this.doubleScan) {
-      this.lastUsage = { inputTokens: first.inputTokens, outputTokens: first.outputTokens, model: this.model };
-      return first.result;
+      const only = await this.scanOnce(file, mimeType);
+      this.lastUsage = { inputTokens: only.inputTokens, outputTokens: only.outputTokens, model: this.model };
+      return only.result;
     }
 
-    let second: ScanResult | null = null;
-    try {
-      second = await this.scanOnce(file, mimeType);
-    } catch {
-      second = null; // a flaky second pass must never sink a good first read
-    }
+    // CRITICAL: parallel, not sequential. With two ~10-15s Vision calls in
+    // series we used to blow past the 30s upload timeout; in parallel the
+    // wall-clock is max(t1, t2) instead of t1+t2 so the upload completes in
+    // about the same time as a single-scan extract.
+    const [r1, r2] = await Promise.allSettled([
+      this.scanOnce(file, mimeType),
+      this.scanOnce(file, mimeType),
+    ]);
 
-    if (!second) {
-      this.lastUsage = { inputTokens: first.inputTokens, outputTokens: first.outputTokens, model: this.model };
-      return first.result;
-    }
+    const first = r1.status === "fulfilled" ? r1.value : null;
+    const second = r2.status === "fulfilled" ? r2.value : null;
 
-    this.lastUsage = {
-      inputTokens: first.inputTokens + second.inputTokens,
-      outputTokens: first.outputTokens + second.outputTokens,
-      model: this.model,
-    };
-    return mergeScans(first.result, second.result);
+    if (first && second) {
+      this.lastUsage = {
+        inputTokens: first.inputTokens + second.inputTokens,
+        outputTokens: first.outputTokens + second.outputTokens,
+        model: this.model,
+      };
+      return mergeScans(first.result, second.result);
+    }
+    const only = first ?? second;
+    if (!only) {
+      const err = r1.status === "rejected" ? r1.reason : r2.status === "rejected" ? r2.reason : new Error("OCR failed");
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+    this.lastUsage = { inputTokens: only.inputTokens, outputTokens: only.outputTokens, model: this.model };
+    return only.result;
   }
 
   /** One full read (with the existing single-retry-on-invalid-schema loop). */

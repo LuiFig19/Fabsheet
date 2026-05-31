@@ -4,7 +4,11 @@ import { ClaudeVisionExtractor, compressForVision } from "./claude";
 import { MockExtractor } from "./mock";
 import { extractedTimesheetSchema, type ExtractedTimesheet, type TimesheetExtractor } from "./types";
 
-const HARD_TIMEOUT_MS = 30_000;
+// 45s gives a comfortable margin: typical Vision scans land 8-15s, the
+// double-scan path runs in parallel so wall-clock stays at one scan, and the
+// /upload Vercel function maxDuration is 60s. Single scans only have one
+// retry, so this rarely waits the full window unless Anthropic is degraded.
+const HARD_TIMEOUT_MS = 45_000;
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s. Try again, or contact support.`)), ms);
