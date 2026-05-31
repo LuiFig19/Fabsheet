@@ -18,7 +18,18 @@ export async function generateMetadata(): Promise<Metadata> {
     description: "Read paper timesheets, review, and roll up job costing.",
     manifest: "/manifest.json",
     appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: PRODUCT },
-    icons: { icon: "/icon-192.svg", apple: "/icon-192.svg" },
+    icons: {
+      // PNG fleet covers iOS (which rejects SVG for home-screen icons), the
+      // PWA manifest, and the favicon. apple-touch-icon is the one iPadOS
+      // pins when "Add to Home Screen" is tapped.
+      icon: [
+        { url: "/icon-32.png", sizes: "32x32", type: "image/png" },
+        { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+        { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      ],
+      apple: { url: "/apple-touch-icon.png", sizes: "180x180" },
+      shortcut: "/icon-192.png",
+    },
   };
 }
 

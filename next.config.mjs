@@ -1,9 +1,13 @@
 // No basePath. The app is served at the domain root (fabsheet.org/dashboard).
 // Access control is BetterAuth (magic link + allowlist), not URL obscurity.
 
+// R2 hosts. We allow both the account host (path-style, what we sign now) and
+// the wildcard virtual-hosted form as a safety net so signed GETs keep working
+// if the SDK ever changes its default URL style.
 const r2Host = process.env.R2_ACCOUNT_ID
   ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
   : "";
+const r2Wildcard = "https://*.r2.cloudflarestorage.com https://*.r2.dev";
 const r2Public = process.env.R2_PUBLIC_URL || "";
 
 // Content Security Policy. Next needs 'unsafe-inline' for its injected styles
@@ -13,9 +17,9 @@ const csp = [
   `default-src 'self'`,
   `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""}`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src 'self' data: blob: ${r2Host} ${r2Public}`.trim(),
+  `img-src 'self' data: blob: ${r2Host} ${r2Wildcard} ${r2Public}`.trim().replace(/\s+/g, " "),
   `font-src 'self' data:`,
-  `connect-src 'self' https://api.anthropic.com https://api.resend.com ${r2Host} ${r2Public}`.trim(),
+  `connect-src 'self' https://api.anthropic.com https://api.resend.com ${r2Host} ${r2Wildcard} ${r2Public}`.trim().replace(/\s+/g, " "),
   `frame-ancestors 'none'`,
   `base-uri 'self'`,
   `form-action 'self'`,

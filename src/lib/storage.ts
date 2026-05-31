@@ -32,6 +32,12 @@ function r2(): S3Client {
       accessKeyId: process.env.R2_ACCESS_KEY_ID!,
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
     },
+    // Force path-style URLs so signed GETs come back as
+    //   https://<account>.r2.cloudflarestorage.com/<bucket>/<key>?...
+    // instead of the virtual-hosted form
+    //   https://<bucket>.<account>.r2.cloudflarestorage.com/<key>?...
+    // Path-style matches a single literal host (no wildcard subdomain in CSP).
+    forcePathStyle: true,
   });
   return _client;
 }

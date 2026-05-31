@@ -36,11 +36,16 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ u
   if (!upload) notFound();
 
   // Signed/public URL for the original photo so the manager can verify what
-  // they're approving. Errors here are non-fatal — we just hide the panel.
+  // they're approving. Errors are non-fatal but logged — silently hiding the
+  // panel made it look like the feature was broken.
   let photoUrl: string | null = null;
+  let photoError: string | null = null;
   try {
     photoUrl = await getUploadUrl({ filePath: upload.filePath, storageKey: upload.storageKey, storageUrl: upload.storageUrl });
-  } catch { photoUrl = null; }
+  } catch (err) {
+    photoError = err instanceof Error ? err.message : "Could not resolve the stored photo URL.";
+    console.error("[review] photo URL failed for upload", uploadId, err);
+  }
   const isPdf = upload.mimeType === "application/pdf";
 
   const threshold = company?.ocrThreshold ?? 0.7;
@@ -105,7 +110,18 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ u
         employees={employees.map((e) => ({ id: e.id, name: e.name }))}
       />
 
-      {photoUrl && <PhotoPanel url={photoUrl} isPdf={isPdf} fileName={upload.filePath} />}
+      {photoUrl ? (
+        <PhotoPanel url={photoUrl} isPdf={isPdf} fileName={upload.filePath} />
+      ) : photoError ? (
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <AlertTriangle className="h-4 w-4 text-amber-600" /> Original timesheet unavailable
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-4 text-sm text-muted-foreground">{photoError}</CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
