@@ -36,10 +36,10 @@ export function ProductionGoalCard({
   const headline = onTrack
     ? `Target hit - ${fmtHours(productive - target)} h over the line.`
     : onWeekend
-      ? `Work week is over. ${remaining > 0 ? `Missed by ${fmtHours(remaining)} h.` : "Goal hit."} Next week starts Monday at 0 / ${target}.`
+      ? `Work week is over (Sunday). ${remaining > 0 ? `Missed by ${fmtHours(remaining)} h.` : "Goal hit."} Next week starts Monday at 0 / ${target}.`
       : daysRemaining === 0
-        ? `End of Friday. ${remaining > 0 ? `Short ${fmtHours(remaining)} h on this week.` : "Goal hit."}`
-        : `Need ${fmtHours(remaining)} more production hours by Friday - ${fmtHours(perDay)} h/day across ${daysRemaining} working day${daysRemaining === 1 ? "" : "s"} left.`;
+        ? `End of Friday. ${remaining > 0 ? `Short ${fmtHours(remaining)} h - Saturday OT can still close the gap.` : "Goal hit."}`
+        : `Need ${fmtHours(remaining)} more production hours by Friday - ${fmtHours(perDay)} h/day across ${daysRemaining} working day${daysRemaining === 1 ? "" : "s"} left. Saturday is overtime headroom.`;
 
   return (
     <Card

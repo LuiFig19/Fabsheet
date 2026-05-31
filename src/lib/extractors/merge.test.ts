@@ -77,4 +77,16 @@ describe("mergeScans (double-scan reconciliation)", () => {
     const m = mergeScans(sheet(), sheet());
     expect(m.rows).toHaveLength(7);
   });
+
+  it("treats time fields as agreeing when they normalize to the same shop time", () => {
+    // "1:00" and "13:00" are the same time after AM/PM resolution. Without
+    // time-aware comparison this used to look like disagreement and cap
+    // confidence below 0.5 — the source of false 'needs review' on routine
+    // PM resolution.
+    const a = sheet({ rows: [row(1, { startedTime: fstr("1:00", 0.8), finishedTime: fstr("4:00", 0.8) })] });
+    const b = sheet({ rows: [row(1, { startedTime: fstr("13:00", 0.8), finishedTime: fstr("16:00", 0.8) })] });
+    const m = mergeScans(a, b);
+    expect(m.rows[0]?.startedTime.confidence).toBeGreaterThan(0.7);
+    expect(m.rows[0]?.finishedTime.confidence).toBeGreaterThan(0.7);
+  });
 });

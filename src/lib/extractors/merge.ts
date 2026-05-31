@@ -1,11 +1,15 @@
 import type { ExtractedRow, ExtractedTimesheet } from "./types";
+import { normalizeShopTime } from "@/lib/utils";
 
 /**
  * Reconcile two independent reads of the same sheet (the double-scan path).
  * Fields that agree get a small confidence boost; any disagreement is capped
  * well under the default 0.7 review threshold so it surfaces in Review. A row
- * only one pass saw is kept but treated as uncertain. Pure + dependency-free so
- * it can be unit-tested without the Vision SDK.
+ * only one pass saw is kept but treated as uncertain.
+ *
+ * For TIME fields, the comparison happens after normalizeShopTime so "1:00"
+ * and "13:00" register as agreement rather than disagreement — that was the
+ * main source of false "needs review" on routine PM-resolved times.
  */
 const AGREE_BOOST = 0.05;
 const DISAGREE_CAP = 0.49;
@@ -16,8 +20,16 @@ function norm(v: string | null | undefined): string {
   return (v ?? "").toString().trim().toLowerCase();
 }
 
-function mergeField<T extends Field>(a: T, b: T): T {
-  if (norm(a.value) === norm(b.value)) {
+/** Canonical key for time-field comparison. Falls back to plain norm() when
+ *  the value isn't a parseable shop time. */
+function normTime(v: string | null | undefined): string {
+  const raw = (v ?? "").toString().trim();
+  if (!raw) return "";
+  return normalizeShopTime(raw) || raw.toLowerCase();
+}
+
+function mergeField<T extends Field>(a: T, b: T, key: (v: string | null | undefined) => string = norm): T {
+  if (key(a.value) === key(b.value)) {
     return { ...a, confidence: Math.min(1, Math.max(a.confidence, b.confidence) + AGREE_BOOST) };
   }
   const pick = a.confidence >= b.confidence ? a : b;
@@ -34,8 +46,8 @@ function mergeRow(a: ExtractedRow, b: ExtractedRow): ExtractedRow {
     jobNumber: mergeField(a.jobNumber, b.jobNumber),
     unitNumber: mergeField(a.unitNumber, b.unitNumber),
     unitTotal: mergeField(a.unitTotal, b.unitTotal),
-    startedTime: mergeField(a.startedTime, b.startedTime),
-    finishedTime: mergeField(a.finishedTime, b.finishedTime),
+    startedTime: mergeField(a.startedTime, b.startedTime, normTime),
+    finishedTime: mergeField(a.finishedTime, b.finishedTime, normTime),
     taskBubble: mergeField(a.taskBubble, b.taskBubble),
     actionBubble: mergeField(a.actionBubble, b.actionBubble),
     notes: mergeField(a.notes, b.notes),

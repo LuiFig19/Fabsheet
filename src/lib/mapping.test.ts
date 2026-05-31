@@ -69,13 +69,14 @@ describe("parseHeaderDate", () => {
   });
 });
 
-describe("normalizeShopTime (Raven's day-shift inference)", () => {
-  it("expands bare hours to HH:00", () => {
+describe("normalizeShopTime (Raven's day-shift 5 AM-4 PM with OT)", () => {
+  it("expands bare hours to HH:00 and defaults 5/6 to AM (workday start)", () => {
     expect(normalizeShopTime("5")).toBe("05:00");
+    expect(normalizeShopTime("6")).toBe("06:00");
     expect(normalizeShopTime("7")).toBe("07:00");
     expect(normalizeShopTime("12")).toBe("12:00");
   });
-  it("treats 1-4 as PM (no night shift)", () => {
+  it("treats 1-4 as PM (1-4 AM is outside any shift)", () => {
     expect(normalizeShopTime("1")).toBe("13:00");
     expect(normalizeShopTime("4")).toBe("16:00");
     expect(normalizeShopTime("1:30")).toBe("13:30");
@@ -87,6 +88,22 @@ describe("normalizeShopTime (Raven's day-shift inference)", () => {
   it("handles explicit am/pm", () => {
     expect(normalizeShopTime("5pm")).toBe("17:00");
     expect(normalizeShopTime("12am")).toBe("00:00");
+  });
+  it("trusts a leading-zero hour as already-24h (does not flip to PM)", () => {
+    // Vision sometimes returns "04:00" meaning 4 AM. Without the leading-zero
+    // guard we'd misinterpret it as 4 PM (16:00) via the 1-4 rule.
+    expect(normalizeShopTime("04:00")).toBe("04:00");
+    expect(normalizeShopTime("06:30")).toBe("06:30");
+    expect(normalizeShopTime("01:00")).toBe("01:00");
+  });
+  it("flips 5/6 to PM when the row sequence demands it", () => {
+    // Continuing past noon: a row whose previous entry was at 14:00 means
+    // a "5" here is 17:00 (5 PM OT), not 05:00 (impossible — already past).
+    expect(normalizeShopTime("5", { kind: "start", previousMinutes: 14 * 60 })).toBe("17:00");
+    expect(normalizeShopTime("6", { kind: "start", previousMinutes: 14 * 60 })).toBe("18:00");
+    // A finish time can't be before its own start: if start is 09:00, a
+    // finish of "5" must be PM.
+    expect(normalizeShopTime("5", { kind: "finish", previousMinutes: 9 * 60 })).toBe("17:00");
   });
   it("returns empty for unparseable", () => {
     expect(normalizeShopTime("abc")).toBe("");

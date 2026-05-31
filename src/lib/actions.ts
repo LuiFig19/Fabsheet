@@ -18,6 +18,7 @@ import { putUpload } from "@/lib/storage";
 import { limitUpload } from "@/lib/rate-limit";
 import { getTenantContext, scopeWhere, scopeStamp, tenantWhere, type TenantContext } from "@/lib/tenant";
 import { buildDailySummaryCsv, buildQuickbooksCsv, type DailyEntry } from "@/lib/daily-report";
+import { hardWarnings, info, warn, type Warning } from "@/lib/warnings";
 
 // maxDuration is set on the calling route (src/app/upload/page.tsx) because
 // "use server" files only allow async function exports.
@@ -106,10 +107,26 @@ export async function uploadAndExtract(formData: FormData): Promise<UploadResult
       jobs: jobs.map((j) => ({ id: j.id, workOrderNumber: j.workOrderNumber, customerName: j.customerName, quantity: j.quantity })),
     });
 
-    const headerWarnings: string[] = [];
-    if (!matchedEmployee) headerWarnings.push(`Could not auto-pick employee from header ("${result.header.employeeName.value || "blank"}"). Pick one above.`);
-    if (!parsedDate) headerWarnings.push("Could not read the date. Pick one above.");
-    const allWarnings = [...headerWarnings, ...result.warnings];
+    const headerWarnings: Warning[] = [];
+    if (!matchedEmployee) headerWarnings.push(warn(`Could not auto-pick employee from header ("${result.header.employeeName.value || "blank"}"). Pick one above.`));
+    if (!parsedDate) headerWarnings.push(warn("Could not read the date. Pick one above."));
+
+    // Filter noisy Vision warnings about blank/cropped rows — the prompt now
+    // forbids them, but defend in case the model emits one anyway.
+    const VISION_NOISE = /\b(blank|empty|no data|cut off|cropped|missing fields)\b/i;
+    const visionWarnings: Warning[] = (result.warnings ?? [])
+      .filter((w) => typeof w === "string" && w.trim().length > 0 && !VISION_NOISE.test(w))
+      .map((w) => warn(w));
+
+    // Soft sheet-level FYI: low total hours. Doesn't push the sheet into
+    // needs_review by itself (approveCleanUploads ignores info-severity).
+    const totalHours = drafts.reduce((s, d) => s + (d.decimalHours || 0), 0);
+    const softWarnings: Warning[] = [];
+    if (totalHours > 0 && totalHours < 10) {
+      softWarnings.push(info(`Heads up: total hours = ${totalHours.toFixed(2)} (under 10h).`));
+    }
+
+    const allWarnings: Warning[] = [...headerWarnings, ...visionWarnings, ...softWarnings];
 
     await prisma.$transaction([
       ...drafts.map((d) =>
@@ -386,13 +403,14 @@ export async function approveCleanUploads(): Promise<{ ok: true; approved: numbe
 
   const cleanIds: string[] = [];
   for (const u of uploads) {
-    const warnings = Array.isArray(u.warnings) ? (u.warnings as unknown[]) : [];
-    if (warnings.length > 0) continue;
-    const hasRowWarning = u.entries.some((e) => {
+    // "Clean" now means no HARD warnings. Soft (info) warnings like the
+    // "<10h total" FYI are allowed and do not block auto-approval.
+    if (hardWarnings(u.warnings).length > 0) continue;
+    const hasHardRowWarning = u.entries.some((e) => {
       const cby = (e.confidenceByField as Record<string, unknown> | null) ?? {};
-      return Array.isArray(cby._warnings) && (cby._warnings as unknown[]).length > 0;
+      return hardWarnings(cby._warnings).length > 0;
     });
-    if (hasRowWarning) continue;
+    if (hasHardRowWarning) continue;
     if (u.entries.length === 0) continue;
     cleanIds.push(u.id);
   }

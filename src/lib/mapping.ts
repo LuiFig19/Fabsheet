@@ -1,5 +1,9 @@
 import type { ExtractedRow, ExtractedTimesheet } from "@/lib/extractors/types";
-import { computeDecimalHours } from "@/lib/utils";
+import { computeDecimalHours, normalizeShopTime, shopTimeToMinutes } from "@/lib/utils";
+import { warn, type Warning } from "@/lib/warnings";
+
+// Re-export so existing test imports (mapping.test.ts) keep working.
+export { normalizeShopTime } from "@/lib/utils";
 
 /**
  * V5 bubble -> labor-code derivation. The form has no Code field; the manager
@@ -57,9 +61,10 @@ export type EntryDraft = {
   decimalHours: number;
   notes: string;
   confidenceByField: Record<string, number>;
-  // Row-level warnings produced by mapping (UNIT mismatches, job not found,
-  // both bubbles empty, etc). Shown in Review per-row, not just as a banner.
-  warnings: string[];
+  // Row-level warnings. Mostly "warn" severity (real review needs). The
+  // mapping layer never emits "info" warnings - those are sheet-wide and live
+  // in the upload action.
+  warnings: Warning[];
 };
 
 export type MappingInput = {
@@ -83,27 +88,35 @@ function rowIsBlank(r: ExtractedRow | null): boolean {
 }
 
 /**
- * Convert raw OCR rows into editable entry drafts plus per-row warnings. Empty
- * rows are dropped (position is just for the OCR side). Customer + labor code
- * are DERIVED here - the manager never re-enters them.
+ * Convert raw OCR rows into editable entry drafts plus row-level warnings.
+ * Empty rows are dropped silently (welders often use 1-2 rows out of 7 — that
+ * is normal, not a "missing data" situation). Customer + labor code are
+ * DERIVED here, never re-entered.
  *
- * Rules for warnings (these are what flag in Review, nothing else):
- *  - JOB # not found in jobs[]  -> warn the row.
- *  - Both task AND action bubbles empty AND notes empty -> warn "no work
- *    indicated". (Notes alone = legitimate "Other" work - not flagged.)
- *  - UNIT validation against job.quantity per the iteration spec.
+ * Row warnings are only added for things a manager would genuinely act on:
+ *  - JOB # not in the jobs list. (The one canonical hard flag.)
+ *  - UNIT validation against job.quantity.
+ *  - Times outside the shop workday after inference (genuinely odd).
+ *  - End time before start time after inference (definite error).
+ *  - Times completely unreadable (rare; the model normally produces 24h).
+ *
+ * Routine AM/PM resolution (5 -> 17:00, 1:00 -> 13:00, 7 -> 07:00 etc.) is
+ * SILENT — that's expected behavior, not a flag. Blank bubbles/notes are
+ * also silent: the welder may have only filled what was needed.
  */
 export function entriesFromExtraction(input: MappingInput): MappingOutput {
   const drafts: EntryDraft[] = [];
+  let prevFinishMins: number | null = null;
+
   for (const r of input.ex.rows) {
     if (rowIsBlank(r)) continue;
     const row = r!;
-    const warnings: string[] = [];
+    const warnings: Warning[] = [];
 
     const wo = row.jobNumber.value.trim();
     const matched = input.jobs.find((j) => j.workOrderNumber === wo);
     const customer = matched?.customerName ?? "";
-    if (wo && !matched) warnings.push(`JOB # ${wo} is not in the jobs list. Add it in Settings, or fix the number.`);
+    if (wo && !matched) warnings.push(warn(`JOB # ${wo} is not in the jobs list. Add it in Settings, or fix the number.`));
 
     const task = row.taskBubble.value;
     const action = row.actionBubble.value;
@@ -111,23 +124,32 @@ export function entriesFromExtraction(input: MappingInput): MappingOutput {
     const description = action || task || (notes ? "Other" : "");
     const laborCode = codeFromBubble(task, action);
 
-    if (!task && !action && !notes) warnings.push("No task, action, or notes filled. Pick one in Review.");
-
     const unitNumber = parseIntOrNull(row.unitNumber.value);
     const unitTotal = parseIntOrNull(row.unitTotal.value);
     if (matched) {
       const v = validateUnit(unitNumber, unitTotal, matched.quantity, wo);
-      if (v) warnings.push(v);
+      if (v) warnings.push(warn(v));
     }
 
-    // Normalize times from whatever shorthand the welder wrote (5, 5:30,
-    // 1, 1pm, 12, etc.) to HH:MM 24-hour. If we can't parse, store empty
-    // so the field gets flagged in Review.
-    const startTime = normalizeShopTime(row.startedTime.value) || row.startedTime.value;
-    const endTime = normalizeShopTime(row.finishedTime.value) || row.finishedTime.value;
-    const decimalHours = computeDecimalHours(startTime, endTime);
-    if (!normalizeShopTime(row.startedTime.value)) warnings.push(`Could not read start time "${row.startedTime.value}".`);
-    if (!normalizeShopTime(row.finishedTime.value)) warnings.push(`Could not read finish time "${row.finishedTime.value}".`);
+    // Normalize times. Use chronological context so 6 in a row that follows a
+    // PM finish resolves to 18:00, not 06:00.
+    const rawStart = row.startedTime.value;
+    const rawEnd = row.finishedTime.value;
+    const startTime = normalizeShopTime(rawStart, { kind: "start", previousMinutes: prevFinishMins });
+    const startMins = shopTimeToMinutes(startTime);
+    const endTime = normalizeShopTime(rawEnd, { kind: "finish", previousMinutes: startMins ?? prevFinishMins });
+    const endMins = shopTimeToMinutes(endTime);
+    const decimalHours = startTime && endTime ? computeDecimalHours(startTime, endTime) : 0;
+
+    // Only flag genuinely broken times. Routine AM/PM resolution is silent.
+    // Overtime past 4 PM is normal at this shop and does NOT get flagged.
+    if (rawStart && !startTime) warnings.push(warn(`Could not read start time "${rawStart}".`));
+    if (rawEnd && !endTime) warnings.push(warn(`Could not read finish time "${rawEnd}".`));
+    if (startMins != null && endMins != null && endMins <= startMins) {
+      warnings.push(warn(`Finish ${endTime} is at or before start ${startTime}. Check the order.`));
+    }
+
+    if (endMins != null) prevFinishMins = endMins;
 
     drafts.push({
       workOrderNumber: wo,
@@ -136,8 +158,8 @@ export function entriesFromExtraction(input: MappingInput): MappingOutput {
       unitTotal,
       description,
       laborCode,
-      startTime,
-      endTime,
+      startTime: startTime || rawStart,
+      endTime: endTime || rawEnd,
       decimalHours,
       notes,
       confidenceByField: {
@@ -262,53 +284,4 @@ function makeDate(year: number, month: number, day: number): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/**
- * Normalize a time string from the timesheet. Raven's runs day-shift only
- * (5 AM through 4 PM), so:
- *   - "5"     -> "05:00"  (5 AM)
- *   - "7:30"  -> "07:30"
- *   - "12"    -> "12:00"  (noon)
- *   - "1"     -> "13:00"  (1 PM — no night shift, so 1-4 always PM)
- *   - "1:30"  -> "13:30"
- *   - "13:00" -> "13:00"  (already 24h, pass through)
- *   - "16:00" -> "16:00"
- * Anything we can't parse returns "" so the field is flagged for review.
- */
-export function normalizeShopTime(s: string | null | undefined): string {
-  if (!s) return "";
-  const t = String(s).trim().toLowerCase();
-  if (!t) return "";
-
-  // Explicit AM/PM in case the welder wrote "5pm" or "5 pm"
-  const ampm = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/.exec(t);
-  if (ampm) {
-    let h = Number(ampm[1]);
-    const m = Number(ampm[2] ?? "0");
-    if (ampm[3] === "pm" && h !== 12) h += 12;
-    if (ampm[3] === "am" && h === 12) h = 0;
-    return fmtHHMM(h, m);
-  }
-
-  // HH:MM or H:MM
-  const colon = /^(\d{1,2}):(\d{2})$/.exec(t);
-  if (colon) {
-    let h = Number(colon[1]);
-    const m = Number(colon[2]);
-    if (h >= 1 && h <= 4) h += 12; // Raven's day-shift PM inference
-    return fmtHHMM(h, m);
-  }
-
-  // Just a number ("5", "12")
-  const intOnly = /^(\d{1,2})$/.exec(t);
-  if (intOnly) {
-    let h = Number(intOnly[1]);
-    if (h >= 1 && h <= 4) h += 12; // PM inference
-    return fmtHHMM(h, 0);
-  }
-
-  return ""; // unparseable — caller flags
-}
-function fmtHHMM(h: number, m: number): string {
-  if (h < 0 || h > 23 || m < 0 || m > 59) return "";
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
+// normalizeShopTime moved to @/lib/utils (re-exported at the top of this file).

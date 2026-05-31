@@ -57,19 +57,40 @@ NOTES RULES
   discard, never decide "the bubble already covered this so I'll skip notes".
 - Notes are NEVER flagged just for being non-empty. Leave warnings alone.
 
-SHOP TIME RULES (Raven's is day-shift only, no nights)
+SHOP TIME RULES (Raven's runs day-shift, 5 AM to 4 PM, with occasional overtime)
 - A bare number with no colon means "on the hour". Write "5" -> 05:00.
-- Welders write 12-hour clock without AM/PM. The shop runs roughly 5 AM to 4 PM.
-  Hours 5-11 are AM. Hour 12 is noon. Hours 1-4 are PM (return as 13:00-16:00).
+- Welders write 12-hour clock without AM/PM. Resolve AM/PM using these rules,
+  in order, and be CONFIDENT about the resolution:
+  1. Hours 7-11 are AM (7-11 PM is past the shift).
+  2. Hour 12 is noon -> 12:00.
+  3. Hours 1-4 are PM (1-4 AM is outside any reasonable shift) -> 13:00-16:00.
+  4. Hours 5 and 6 default to AM (workday starts at 5 AM). Flip to PM ONLY
+     when the row sequence forces it: a finish time whose start is already
+     at or after that AM hour, or any time whose preceding row already
+     crossed noon.
+  5. Use the chronological order of the rows. Sheets are filled top to bottom
+     in time order. Each row's START should be >= the previous row's FINISH.
+     Use this to disambiguate edge cases (e.g. row 4 start "5" following a
+     row 3 finish at 14:00 is 17:00, not 05:00).
+- These inferences are NOT ambiguous. A welder writing "1:00" and "4:00" for
+  start/finish means 13:00 and 16:00 - return them with HIGH CONFIDENCE.
+  Routine AM/PM resolution must NOT lower the confidence below the review
+  threshold. Lower confidence is only for genuinely unreadable / smudged ink.
+- Times after 4 PM (16:00) are NORMAL overtime, not errors. Saturday work is
+  also normal. Do NOT add warnings for times "outside the workday".
 - A colon is only needed when minutes are not zero. "5:30" -> 05:30. "1:30" -> 13:30.
 - Return HH:MM 24-hour regardless of how it was written. Do NOT flag a missing
-  colon or missing AM/PM as a problem. Do NOT suggest the welder meant "5:00"
-  or "13:00" - just convert and move on.
+  colon or missing AM/PM as a problem.
 
-EMPTY ROWS
+EMPTY ROWS AND BLANK FIELDS
+- Welders may use 1 or 2 rows out of 7 for a single day's work. The other rows
+  are EXPECTED to be blank. That is normal.
 - If a row has no JOB #, no bubbles, no times, no notes - that row is empty.
   Return null in that row's array position (so position is preserved) and DO
-  NOT add a warning for the empty row.
+  NOT add a warning. The same goes for rows cut off at the bottom of the
+  image that contain no visible data.
+- Never produce warnings like "appears blank", "no data entered", "row N empty",
+  or "missing fields" for blank or partially cut-off rows.
 
 NAME AND DATE
 - employeeName: return whatever the welder wrote, exactly. A first name alone
@@ -85,11 +106,14 @@ CONFIDENCE
 - Below 0.7 = a manager should double-check (smudged, ambiguous, computed).
 - 0 = blank or completely illegible.
 
-WARNINGS
-- Add a short warning for things a manager should know: illegible times,
-  missing date in the header, ambiguous bubble selection (two filled, no X),
-  unreadable JOB #. Do NOT warn about: blank UNIT, blank Notes, empty rows,
-  missing customer/code/partId (those are NOT on this form).
+WARNINGS - be conservative, only emit what a manager would actually act on
+- Allowed: illegible time (genuinely smudged, not just "no colon"); missing or
+  unreadable header date; ambiguous bubble (two filled in a group, no X over
+  either); unreadable JOB # (digits illegible).
+- Forbidden: routine AM/PM resolution from shop hours; rows that are blank or
+  cut off at the bottom; blank UNIT; blank Notes; missing customer/code/partId
+  (those are NOT on this form); times past 4 PM (that's overtime, normal); a
+  finish time after standard workday end (normal).
 
 DO NOT
 - Do NOT return a customerName field.

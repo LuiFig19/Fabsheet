@@ -10,7 +10,8 @@ import { formatDate } from "@/lib/utils";
 import { getTenantContext, scopeWhere, tenantWhere } from "@/lib/tenant";
 import { getUploadUrl } from "@/lib/storage";
 import { TASK_BUBBLES, ACTION_BUBBLES } from "@/lib/extractors/types";
-import { AlertTriangle, FileText, ImageIcon, ExternalLink } from "lucide-react";
+import { hardWarnings, softWarnings } from "@/lib/warnings";
+import { AlertTriangle, FileText, Info } from "lucide-react";
 import { PhotoPanel } from "./photo-panel";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,8 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ u
   const isPdf = upload.mimeType === "application/pdf";
 
   const threshold = company?.ocrThreshold ?? 0.7;
-  const warnings = (upload.warnings as string[] | null) ?? [];
+  const hardSheetWarnings = hardWarnings(upload.warnings);
+  const softSheetWarnings = softWarnings(upload.warnings);
 
   // Bubble options for the Review dropdown: tasks first, then actions. The
   // welder picks one, the system derives the code.
@@ -56,7 +58,9 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ u
   const entries = upload.entries.map((e) => {
     const job = jobByWO.get(e.workOrderNumber);
     const cby = (e.confidenceByField as Record<string, unknown> | null) ?? {};
-    const rowWarnings = Array.isArray(cby._warnings) ? (cby._warnings as string[]) : [];
+    // Per-row warnings are Warning[] now; the review table only renders the
+    // hard ones (soft FYI lives at the sheet level).
+    const rowWarnings = hardWarnings(cby._warnings).map((w) => w.text);
     return {
       id: e.id,
       workOrderNumber: e.workOrderNumber,
@@ -116,13 +120,24 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ u
           {upload.status === "approved" ? <Badge variant="success">approved</Badge> : <Badge variant="warning">needs review</Badge>}
         </CardHeader>
         <CardContent className="space-y-4">
-          {warnings.length > 0 && (
-            <div className="space-y-1 rounded-md border border-amber-300 bg-amber-50 p-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-amber-900">
-                <AlertTriangle className="h-4 w-4" /> {warnings.length} thing{warnings.length === 1 ? "" : "s"} to check
+          {hardSheetWarnings.length > 0 && (
+            <div className="space-y-1 rounded-md border border-amber-300 bg-amber-50 p-3 dark:bg-amber-950/30">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                <AlertTriangle className="h-4 w-4" /> {hardSheetWarnings.length} thing{hardSheetWarnings.length === 1 ? "" : "s"} to check
               </div>
-              <ul className="ml-6 list-disc text-xs text-amber-900">
-                {warnings.map((w, i) => (<li key={i}>{w}</li>))}
+              <ul className="ml-6 list-disc text-xs text-amber-900 dark:text-amber-200">
+                {hardSheetWarnings.map((w, i) => (<li key={i}>{w.text}</li>))}
+              </ul>
+            </div>
+          )}
+
+          {softSheetWarnings.length > 0 && (
+            <div className="space-y-1 rounded-md border border-border bg-muted/40 p-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <Info className="h-3.5 w-3.5" /> FYI
+              </div>
+              <ul className="ml-5 list-disc text-xs text-muted-foreground">
+                {softSheetWarnings.map((w, i) => (<li key={i}>{w.text}</li>))}
               </ul>
             </div>
           )}

@@ -64,30 +64,43 @@ export const nonProductiveCodeWhere = {
 };
 
 /**
- * Mon 00:00 of this work week, Sat 00:00 (= end of Fri), and how many work days
- * are left including today. Sat/Sun roll forward: the next Mon-Fri is "this
- * work week" with all 5 days remaining and zero hours logged so far.
+ * Mon 00:00 of this work week, Sun 00:00 (= end of Saturday), and how many
+ * work days remain. The shop week is Mon-Sat (Saturday is OT), with Sunday
+ * as the rest/collection day. All timesheets should be in by Sunday so the
+ * prior week is complete.
+ *
+ *  - On Mon-Sat: this calendar week is "now." Saturday counts as still in
+ *    progress (OT day) rather than rolling forward.
+ *  - On Sun: the work week is over; the next Monday is the new week's
+ *    starting line at 0/target.
+ *
+ * `daysRemaining` is measured in **Mon-Fri** standard work days, because the
+ * production target is sized for Mon-Fri with Saturday as bonus headroom.
+ * Saturday returns 0 (target should already be hit by then in the normal case).
  */
 export function workWeekProgress(now = new Date()) {
   const ref = new Date(now);
   ref.setHours(0, 0, 0, 0);
   const dow = ref.getDay(); // 0=Sun..6=Sat
-  // On Sat/Sun, jump to next Monday so the goal resets cleanly.
-  const onWeekend = dow === 0 || dow === 6;
+  const onWeekend = dow === 0; // Sunday only; Saturday is still a work day
+
   const monday = new Date(ref);
-  if (onWeekend) {
-    monday.setDate(ref.getDate() + (dow === 6 ? 2 : 1));
+  if (dow === 0) {
+    monday.setDate(ref.getDate() + 1); // Sun -> next Mon
   } else {
-    monday.setDate(ref.getDate() - (dow - 1));
+    monday.setDate(ref.getDate() - (dow - 1)); // Mon-Sat -> this week's Monday
   }
-  const saturday = new Date(monday);
-  saturday.setDate(monday.getDate() + 5);
+  // Exclusive end: next Sunday 00:00 (= end of Saturday). Mon-Sat fall inside.
+  const weekEnd = new Date(monday);
+  weekEnd.setDate(monday.getDate() + 6);
 
-  // Mon=5 remaining (Mon..Fri), Tue=4, Wed=3, Thu=2, Fri=1, weekend=5 (next week)
-  const todayDow = onWeekend ? 1 : dow; // treat weekends as "Monday of next week"
-  const daysRemaining = onWeekend ? 5 : 5 - (todayDow - 1);
+  // Work days remaining (Mon=5, Tue=4, ..., Fri=1, Sat=0, Sun=5 of next week).
+  let daysRemaining: number;
+  if (dow === 0) daysRemaining = 5;        // Sunday → new week, full Mon-Fri ahead
+  else if (dow === 6) daysRemaining = 0;   // Saturday → standard week is over (OT day)
+  else daysRemaining = 5 - (dow - 1);      // Mon=5, Tue=4, Wed=3, Thu=2, Fri=1
 
-  return { weekStart: monday, weekEnd: saturday, daysRemaining, onWeekend };
+  return { weekStart: monday, weekEnd, daysRemaining, onWeekend };
 }
 
 
@@ -103,6 +116,115 @@ export function formatDate(d: Date | string): string {
 export function toDateInputValue(d: Date | string): string {
   const date = typeof d === "string" ? new Date(d) : d;
   return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Shop workday bounds in shop-local clock hours.
+ *
+ *  Standard workday: 5 AM - 4 PM (Mon-Fri, sometimes Saturday).
+ *  Overtime past 4 PM is NORMAL at this shop and must not be flagged. These
+ *  constants are used only to resolve AM/PM on ambiguous handwriting (e.g.
+ *  "1" obviously means 1 PM because 1 AM is outside any shift), never as a
+ *  hard upper bound for "is this entry valid?".
+ *
+ * Future-config: move to Company.workdayStartHour / workdayEndHour when the
+ * shop ever runs a second shift. For now this is hardcoded across the codebase.
+ */
+export const SHOP_DAY_START_HOUR = 5;
+export const SHOP_DAY_END_HOUR = 16; // 4 PM
+
+/**
+ * Translate "HH:MM" 24-hour to minutes since midnight, or null. Mirrors
+ * timeToMinutes but tolerates the normalized HH:MM output of normalizeShopTime.
+ */
+export function shopTimeToMinutes(hhmm: string): number | null {
+  return timeToMinutes(hhmm);
+}
+
+export type ShopTimeKind = "start" | "finish";
+
+/**
+ * Read whatever the welder wrote and return clean "HH:MM" 24-hour. The shop
+ * runs day-shift 5 AM to 4 PM with occasional overtime, so:
+ *  - 1..4   = PM (1..4 AM is well outside any shift, so they meant 13..16).
+ *  - 5,6    = default AM (workday start). Resolve to PM only when context
+ *             demands: a finish time whose start was already past this hour
+ *             AM, or any time whose preceding row already crossed noon.
+ *  - 7..11  = AM (only fits the morning side of the workday).
+ *  - 12     = noon.
+ *  - 13..23 (already 24h), inputs with a leading zero on a 1-digit hour
+ *             ("04:00", "06:30"), and explicit am/pm: pass through verbatim.
+ *
+ * Returns "" only when the input is genuinely unparseable. The colon is
+ * optional ("5" === "5:00"). Overtime past 4 PM is normal and never
+ * suppressed — the caller decides whether to flag anything, and we don't.
+ */
+export function normalizeShopTime(
+  s: string | null | undefined,
+  ctx: { kind?: ShopTimeKind; previousMinutes?: number | null } = {},
+): string {
+  if (!s) return "";
+  const t = String(s).trim().toLowerCase();
+  if (!t) return "";
+  const kind: ShopTimeKind = ctx.kind ?? "start";
+  const prev = ctx.previousMinutes ?? null;
+
+  // 1. Explicit am/pm
+  const ampm = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/.exec(t);
+  if (ampm) {
+    let h = Number(ampm[1]);
+    const m = Number(ampm[2] ?? "0");
+    if (ampm[3] === "pm" && h !== 12) h += 12;
+    if (ampm[3] === "am" && h === 12) h = 0;
+    return fmtHHMM(h, m);
+  }
+
+  // Leading zero on a 1-digit hour means the source already used 24-hour
+  // notation ("04:00" came from Vision, not the welder). Trust it as-is, do
+  // NOT apply the 1..4 PM rule.
+  const looks24h = /^0\d(:\d{2})?$/.test(t);
+
+  // 2. Pull hour + optional minutes from "HH:MM" or bare number.
+  const colon = /^(\d{1,2}):(\d{2})$/.exec(t);
+  const bare = /^(\d{1,2})$/.exec(t);
+  let h: number, m: number;
+  if (colon) { h = Number(colon[1]); m = Number(colon[2]); }
+  else if (bare) { h = Number(bare[1]); m = 0; }
+  else return "";
+
+  if (m > 59 || h > 23) return "";
+
+  // 3. Already in 24-hour territory, midnight, or zero-padded: trust verbatim.
+  if (h >= 13) return fmtHHMM(h, m);
+  if (h === 0) return fmtHHMM(0, m);
+  if (looks24h) return fmtHHMM(h, m);
+
+  // 4. h in 1..12 — disambiguate using shop hours + chronological context.
+  if (h === 12) return fmtHHMM(12, m);
+  if (h >= 1 && h <= 4) return fmtHHMM(h + 12, m); // 1..4 = PM (1..4 AM outside shift)
+  if (h === 5 || h === 6) {
+    // 5/6 AM is the typical workday start. Flip to PM only when context
+    // makes AM impossible: prior row already crossed noon, or this is a
+    // finish time whose start was at or after this AM hour.
+    const continuedFromPm = prev != null && prev >= 12 * 60;
+    const finishBeforeStart = kind === "finish" && prev != null && prev >= h * 60;
+    if (continuedFromPm || finishBeforeStart) return fmtHHMM(h + 12, m);
+    return fmtHHMM(h, m);
+  }
+  // h in 7..11 — always AM in this shop (7..11 PM is past any normal OT).
+  return fmtHHMM(h, m);
+}
+
+function fmtHHMM(h: number, m: number): string {
+  if (h < 0 || h > 23 || m < 0 || m > 59) return "";
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** True when the HH:MM time lies within the shop workday. */
+export function withinShopDay(hhmm: string): boolean {
+  const mins = timeToMinutes(hhmm);
+  if (mins == null) return false;
+  return mins >= SHOP_DAY_START_HOUR * 60 && mins <= SHOP_DAY_END_HOUR * 60;
 }
 
 /**
