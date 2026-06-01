@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!email) return NextResponse.json({ ok: false, error: "missing ?email=" }, { status: 400 });
 
   const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
+    .split(/[\s,;]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   if (!allowed.includes(email)) {

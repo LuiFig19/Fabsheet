@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const email = (req.nextUrl.searchParams.get("email") ?? "").trim().toLowerCase();
   if (!email) return NextResponse.json({ ok: false, error: "missing ?email=" }, { status: 400 });
   const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    .split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (!allowed.includes(email)) {
     return NextResponse.json({ ok: false, error: "email not in ALLOWED_EMAILS" }, { status: 403 });
   }

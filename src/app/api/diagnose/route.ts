@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // initial setup before any account is signed in.
 export async function GET() {
   const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
+    .split(/[\s,;]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 

@@ -26,7 +26,7 @@ export const BASE_URL = resolveBaseURL();
 function allowlistOK(email: string): boolean {
   if ((process.env.AUTH_MODE ?? "allowlist") !== "allowlist") return true;
   const list = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
+    .split(/[\s,;]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   return list.length === 0 || list.includes(email.trim().toLowerCase());
@@ -120,7 +120,7 @@ export const auth = betterAuth({
       sendMagicLink: async ({ email, url }) => {
         if (!allowlistOK(email)) {
           console.log(`[auth] ${email} not allowlisted; skipping send.`);
-          return;
+          throw new Error("That email is not allowed to sign in. Add it to ALLOWED_EMAILS in Vercel, then redeploy.");
         }
         await sendMagicLinkEmail(email, url);
       },

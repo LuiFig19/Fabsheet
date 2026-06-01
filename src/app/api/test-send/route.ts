@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   }
 
   const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
+    .split(/[\s,;]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   if (!allowed.includes(email)) {
