@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { codeFromBubble, validateUnit, matchEmployee, parseHeaderDate, normalizeShopTime } from "./mapping";
+import { codeFromBubble, validateUnit, matchEmployee, parseHeaderDate, normalizeShopTime, reconcileTimeClockTotal, type EntryDraft } from "./mapping";
 
 describe("codeFromBubble (Task/Action -> labor code)", () => {
   it("maps component tasks to 110 except Decking", () => {
@@ -108,5 +108,51 @@ describe("normalizeShopTime (Raven's day-shift 5 AM-4 PM with OT)", () => {
   it("returns empty for unparseable", () => {
     expect(normalizeShopTime("abc")).toBe("");
     expect(normalizeShopTime("")).toBe("");
+  });
+});
+
+describe("reconcileTimeClockTotal", () => {
+  function draft(startTime: string, endTime: string, decimalHours: number): EntryDraft {
+    return {
+      workOrderNumber: "4354",
+      customerName: "Customer",
+      unitNumber: null,
+      unitTotal: null,
+      description: "Frame",
+      laborCode: "110 Weld/Fab",
+      startTime,
+      endTime,
+      decimalHours,
+      notes: "",
+      confidenceByField: {},
+      warnings: [],
+    };
+  }
+
+  it("corrects small OCR drift against the Raven's time-clock day total", () => {
+    const rows = [
+      draft("05:00", "09:00", 4),
+      draft("09:00", "12:00", 3),
+      draft("13:00", "16:00", 2.75),
+    ];
+
+    reconcileTimeClockTotal(rows);
+
+    expect(rows.reduce((s, r) => s + r.decimalHours, 0)).toBe(10);
+    expect(rows[2].decimalHours).toBe(3);
+    expect(rows[2].confidenceByField.timeClockReconciled).toBe(1);
+  });
+
+  it("does not hide large gaps that need manager review", () => {
+    const rows = [
+      draft("05:00", "09:00", 4),
+      draft("09:00", "12:00", 3),
+      draft("13:00", "16:00", 1.5),
+    ];
+
+    reconcileTimeClockTotal(rows);
+
+    expect(rows.reduce((s, r) => s + r.decimalHours, 0)).toBe(8.5);
+    expect(rows[2].confidenceByField.timeClockReconciled).toBeUndefined();
   });
 });

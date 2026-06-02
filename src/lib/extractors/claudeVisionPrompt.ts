@@ -81,6 +81,13 @@ SHOP TIME RULES (Raven's runs day-shift, 5 AM to 4 PM, with occasional overtime)
 - A colon is only needed when minutes are not zero. "5:30" -> 05:30. "1:30" -> 13:30.
 - Return HH:MM 24-hour regardless of how it was written. Do NOT flag a missing
   colon or missing AM/PM as a problem.
+- Before returning, do a row-sequence sanity check. For a normal full Raven's
+  day, the first visible start may be 05:00 and the last visible finish may be
+  16:00. That time-clock span is treated as a 10-hour paid day after the
+  standard unpaid break. If your row times accidentally total 9.75 or 10.25
+  because one handwritten minute mark was misread, re-check the suspicious row
+  carefully. Do not force every sheet to 10 hours; only use this as a visual
+  double-check for likely OCR drift.
 
 EMPTY ROWS AND BLANK FIELDS
 - Welders may use 1 or 2 rows out of 7 for a single day's work. The other rows

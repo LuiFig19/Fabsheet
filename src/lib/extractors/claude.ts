@@ -30,6 +30,9 @@ export async function compressForVision(buffer: Buffer, mimeType: string): Promi
     const out = await sharp(buffer)
       .rotate() // honor EXIF orientation so portraits don't come in sideways
       .resize(1568, 1568, { fit: "inside", withoutEnlargement: true })
+      .flatten({ background: "#ffffff" })
+      .normalise()
+      .sharpen({ sigma: 1 })
       .jpeg({ quality: 85 })
       .toBuffer();
     return { buffer: out, mimeType: "image/jpeg" };
@@ -99,8 +102,8 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
     // wall-clock is max(t1, t2) instead of t1+t2 so the upload completes in
     // about the same time as a single-scan extract.
     const [r1, r2] = await Promise.allSettled([
-      this.scanOnce(file, mimeType),
-      this.scanOnce(file, mimeType),
+      this.scanOnce(file, mimeType, "primary"),
+      this.scanOnce(file, mimeType, "verification"),
     ]);
 
     const first = r1.status === "fulfilled" ? r1.value : null;
@@ -124,14 +127,16 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
   }
 
   /** One full read (with the existing single-retry-on-invalid-schema loop). */
-  private async scanOnce(file: Buffer, mimeType: string): Promise<ScanResult> {
+  private async scanOnce(file: Buffer, mimeType: string, mode: "primary" | "verification" = "primary"): Promise<ScanResult> {
     const source = this.buildSource(file, mimeType);
 
     const baseUserContent = [
       source,
       {
         type: "text",
-        text: "Read this Raven's Marine V5 timesheet. Call submit_timesheet with all 7 row slots (use null for blank rows) and a confidence on every field.",
+        text: mode === "verification"
+          ? "Verification pass: read this Raven's Marine V5 timesheet slowly. Focus on START/FINISH times, filled-vs-X-canceled bubbles, JOB # digits, UNIT fields, and Notes. Use row order to sanity-check times before calling submit_timesheet with all 7 row slots."
+          : "Read this Raven's Marine V5 timesheet. Call submit_timesheet with all 7 row slots (use null for blank rows) and a confidence on every field.",
       },
     ] as unknown as Anthropic.MessageParam["content"];
 

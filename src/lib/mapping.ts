@@ -76,6 +76,10 @@ export type MappingOutput = {
   drafts: EntryDraft[];
 };
 
+const DAILY_UNPAID_BREAK_HOURS = 1;
+const MIN_SPAN_FOR_UNPAID_BREAK_HOURS = 6;
+const MAX_AUTOFIX_HOURS = 0.5;
+
 function parseIntOrNull(v: string | null | undefined): number | null {
   if (v == null || v === "") return null;
   const n = Number.parseInt(String(v).trim(), 10);
@@ -174,7 +178,57 @@ export function entriesFromExtraction(input: MappingInput): MappingOutput {
       warnings,
     });
   }
+  reconcileTimeClockTotal(drafts);
   return { drafts };
+}
+
+/**
+ * The paper sheet splits one day across multiple job rows, but Raven's compares
+ * the final total against the time clock. If OCR reads one row a few minutes
+ * short, the sum can land at 9.75 even though the sheet clearly spans 5 AM to
+ * 4 PM, which Raven's treats as a 10-hour paid day. Correct only small drift
+ * against the first-start/last-finish span; large gaps remain for review.
+ */
+export function reconcileTimeClockTotal(drafts: EntryDraft[]): void {
+  const timed = drafts
+    .map((d, index) => ({
+      d,
+      index,
+      start: shopTimeToMinutes(d.startTime),
+      end: shopTimeToMinutes(d.endTime),
+    }))
+    .filter((r): r is { d: EntryDraft; index: number; start: number; end: number } => r.start != null && r.end != null && r.d.decimalHours > 0);
+
+  if (timed.length < 2) return;
+
+  const firstStart = Math.min(...timed.map((r) => r.start));
+  const lastEnd = Math.max(...timed.map((r) => r.end));
+  const spanHours = Math.round(((lastEnd - firstStart) / 60) * 100) / 100;
+  if (spanHours <= 0) return;
+
+  const expected = roundHours(spanHours - (spanHours >= MIN_SPAN_FOR_UNPAID_BREAK_HOURS ? DAILY_UNPAID_BREAK_HOURS : 0));
+  const actual = roundHours(drafts.reduce((s, d) => s + (d.decimalHours || 0), 0));
+  const delta = roundHours(expected - actual);
+
+  if (expected <= 0 || Math.abs(delta) < 0.01 || Math.abs(delta) > MAX_AUTOFIX_HOURS) return;
+
+  const target = timed
+    .slice()
+    .sort((a, b) => b.end - a.end || b.d.decimalHours - a.d.decimalHours)[0];
+  if (!target) return;
+
+  target.d.decimalHours = roundHours(Math.max(0, target.d.decimalHours + delta));
+  target.d.confidenceByField = {
+    ...target.d.confidenceByField,
+    timeClockReconciled: 1,
+    originalDecimalHours: roundHours(target.d.decimalHours - delta),
+    timeClockDelta: delta,
+    timeClockExpectedTotal: expected,
+  };
+}
+
+function roundHours(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 /**
