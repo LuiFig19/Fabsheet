@@ -16,28 +16,41 @@ import {
   Settings,
   Menu,
   Search,
+  Crown,
+  Users,
+  HardHat,
+  ShieldCheck,
+  Trophy,
 } from "lucide-react";
+import type { NavModule, ModuleKey } from "@/lib/access";
 
-const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/attention", label: "Needs Attention", icon: AlertTriangle },
-  { href: "/upload", label: "Upload", icon: Upload },
-  { href: "/review", label: "Review", icon: ClipboardCheck },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
-  { href: "/production", label: "Production", icon: Target },
-  { href: "/reports", label: "Reports", icon: FileText },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+const ICONS: Record<ModuleKey, typeof LayoutDashboard> = {
+  dashboard: LayoutDashboard,
+  executive: Crown,
+  attention: AlertTriangle,
+  upload: Upload,
+  review: ClipboardCheck,
+  jobs: Briefcase,
+  production: Target,
+  reports: FileText,
+  hr: Users,
+  foreman: HardHat,
+  quality: ShieldCheck,
+  incentives: Trophy,
+  admin: Settings,
+  settings: Settings,
+};
 
-function NavList({ pathname, onClick }: { pathname: string; onClick?: () => void }) {
+function NavList({ pathname, modules, onClick }: { pathname: string; modules: NavModule[]; onClick?: () => void }) {
   return (
     <nav className="flex flex-col gap-0.5 p-2">
-      {NAV.map(({ href, label, icon: Icon, exact }) => {
-        const active = exact ? pathname === href : pathname.startsWith(href);
+      {modules.map((m) => {
+        const Icon = ICONS[m.key] ?? LayoutDashboard;
+        const active = m.exact ? pathname === m.href : pathname.startsWith(m.href);
         return (
           <Link
-            key={href}
-            href={href}
+            key={m.href}
+            href={m.href}
             onClick={onClick}
             className={cn(
               "flex min-h-[40px] items-center gap-3 rounded-md px-3 text-sm transition-colors",
@@ -47,7 +60,8 @@ function NavList({ pathname, onClick }: { pathname: string; onClick?: () => void
             )}
           >
             <Icon className="h-4 w-4" />
-            <span>{label}</span>
+            <span>{m.label}</span>
+            {m.placeholder && <span className="ml-auto rounded bg-sidebar-foreground/10 px-1.5 py-0.5 text-[10px] text-sidebar-foreground/60">soon</span>}
           </Link>
         );
       })}
@@ -74,16 +88,18 @@ function SidebarHeader({ company }: { company: string }) {
 export function AppSidebar({
   company,
   user,
+  modules,
 }: {
   company: string;
   user: { name: string | null; email: string; role: string } | null;
+  modules: NavModule[];
 }) {
   const pathname = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
       <SidebarHeader company={company} />
       <div className="flex-1 overflow-y-auto">
-        <NavList pathname={pathname} />
+        <NavList pathname={pathname} modules={modules} />
       </div>
       {user && (
         <div className="border-t border-sidebar-border p-2">
@@ -97,9 +113,11 @@ export function AppSidebar({
 export function MobileNav({
   company,
   user,
+  modules,
 }: {
   company: string;
   user: { name: string | null; email: string; role: string } | null;
+  modules: NavModule[];
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -114,7 +132,7 @@ export function MobileNav({
         <SheetTitle className="sr-only">Navigation</SheetTitle>
         <SidebarHeader company={company} />
         <div className="flex-1 overflow-y-auto">
-          <NavList pathname={pathname} onClick={() => setOpen(false)} />
+          <NavList pathname={pathname} modules={modules} onClick={() => setOpen(false)} />
         </div>
         {user && (
           <div className="border-t border-sidebar-border p-2">
@@ -130,16 +148,18 @@ export function TopBar({
   title,
   company,
   user,
+  modules,
   onOpenCommand,
 }: {
   title: string;
   company: string;
   user: { name: string | null; email: string; role: string } | null;
+  modules: NavModule[];
   onOpenCommand?: () => void;
 }) {
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background px-4 lg:px-6" style={{ paddingTop: "env(safe-area-inset-top)" }}>
-      <MobileNav company={company} user={user} />
+      <MobileNav company={company} user={user} modules={modules} />
       <h1 className="hidden text-base font-semibold sm:block">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
         <button

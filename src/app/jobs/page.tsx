@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { approvedHoursByJob } from "@/lib/queries";
 import { getTenantContext, scopeWhere } from "@/lib/tenant";
+import { canAccess, requirePermission } from "@/lib/access";
 import { budgetTier, fmtHours } from "@/lib/utils";
 import { AddJob } from "./add-job";
 
@@ -18,7 +19,9 @@ const TIER_TEXT: Record<string, string> = {
 };
 
 export default async function JobsPage() {
+  await requirePermission("jobs.view");
   const ctx = await getTenantContext();
+  const canWriteJobs = canAccess(ctx.user?.role, "jobs.write") || process.env.AUTH_DISABLED === "true";
   const [jobs, usedByJob] = await Promise.all([
     prisma.job.findMany({ where: scopeWhere(ctx), orderBy: [{ status: "asc" }, { workOrderNumber: "asc" }] }),
     approvedHoursByJob(ctx),
@@ -31,7 +34,7 @@ export default async function JobsPage() {
           <h1 className="text-2xl font-bold">Jobs</h1>
           <p className="text-sm text-muted-foreground">Budgeted vs. used hours. Used hours count approved entries only.</p>
         </div>
-        <AddJob />
+        {canWriteJobs && <AddJob />}
       </div>
 
       <Card>

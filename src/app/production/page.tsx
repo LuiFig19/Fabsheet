@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { buildProductionBreakdown, resolveProductionRange, PER_EMPLOYEE_WEEKLY_TARGET } from "@/lib/production";
 import { getTenantContext } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 import { fmtHours, formatDate } from "@/lib/utils";
 import { ProductionControls } from "./production-controls";
 import { ProductionBreakdownView } from "./production-view";
@@ -15,6 +16,7 @@ export default async function ProductionPage({
   searchParams: Promise<{ week?: string; start?: string; end?: string }>;
 }) {
   const sp = await searchParams;
+  await requirePermission("production.view");
   const ctx = await getTenantContext();
   const range = resolveProductionRange({ week: sp.week, start: sp.start, end: sp.end });
   const data = await buildProductionBreakdown(ctx, range);

@@ -19,6 +19,7 @@ import { limitUpload } from "@/lib/rate-limit";
 import { getTenantContext, scopeWhere, scopeStamp, tenantWhere, type TenantContext } from "@/lib/tenant";
 import { buildDailySummaryCsv, buildQuickbooksCsv, type DailyEntry } from "@/lib/daily-report";
 import { hardWarnings, info, warn, type Warning } from "@/lib/warnings";
+import { requirePermission } from "@/lib/access";
 
 // maxDuration is set on the calling route (src/app/upload/page.tsx) because
 // "use server" files only allow async function exports.
@@ -52,7 +53,7 @@ export type UploadResult =
  * customer + labor code are DERIVED, not extracted.
  */
 export async function uploadAndExtract(formData: FormData): Promise<UploadResult> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.upload");
 
   // Rate limit: 30 uploads / 10 min keyed by user (falls back to tenant when
   // auth is disabled). No-ops if Upstash isn't configured.
@@ -221,7 +222,7 @@ const fieldSchema = z.object({
 });
 
 export async function updateEntry(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.review");
   const parsed = fieldSchema.safeParse(Object.fromEntries(formData.entries()));
   if (!parsed.success) return;
   const { entryId, decimalHours, ...fields } = parsed.data;
@@ -271,7 +272,7 @@ export async function updateEntry(formData: FormData) {
 
 /** Manager overrides the auto-detected employee or date on the upload itself. */
 export async function updateUploadHeader(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.review");
   const uploadId = String(formData.get("uploadId") ?? "");
   const upload = await prisma.timesheetUpload.findFirst({ where: { id: uploadId, ...scopeWhere(ctx) } });
   if (!upload) return;
@@ -302,7 +303,7 @@ export async function updateUploadHeader(formData: FormData) {
 }
 
 export async function approveEntry(entryId: string) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.review");
   const updated = await prisma.timesheetEntry.updateMany({
     where: { id: entryId, ...scopeWhere(ctx) },
     data: { status: "approved", approvedAt: new Date() },
@@ -314,7 +315,7 @@ export async function approveEntry(entryId: string) {
 }
 
 export async function approveAll(uploadId: string) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.review");
   const upload = await prisma.timesheetUpload.findFirst({ where: { id: uploadId, ...scopeWhere(ctx) } });
   if (!upload) return;
   await prisma.timesheetEntry.updateMany({
@@ -338,7 +339,7 @@ async function maybeFinalize(entryId: string) {
 }
 
 export async function addRow(uploadId: string) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.review");
   const upload = await prisma.timesheetUpload.findFirst({ where: { id: uploadId, ...scopeWhere(ctx) } });
   if (!upload) return;
   await prisma.timesheetEntry.create({
@@ -358,7 +359,7 @@ export async function addRow(uploadId: string) {
 }
 
 export async function deleteRow(entryId: string) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.review");
   const deleted = await prisma.timesheetEntry.deleteMany({ where: { id: entryId, ...scopeWhere(ctx) } });
   if (deleted.count === 0) return;
   await audit(ctx, "TimesheetEntry", entryId, "delete");
@@ -372,7 +373,7 @@ export async function deleteRow(entryId: string) {
  * means a re-upload of the same image doesn't re-bill Vision.
  */
 export async function deleteUpload(uploadId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.delete");
   const upload = await prisma.timesheetUpload.findFirst({
     where: { id: uploadId, ...scopeWhere(ctx) },
     select: { id: true, status: true, employeeId: true, date: true },
@@ -394,7 +395,7 @@ export async function deleteUpload(uploadId: string): Promise<{ ok: true } | { o
  * that actually need attention. Returns how many uploads were approved.
  */
 export async function approveCleanUploads(): Promise<{ ok: true; approved: number } | { ok: false; error: string }> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("timesheets.review");
   const s = scopeWhere(ctx);
   const uploads = await prisma.timesheetUpload.findMany({
     where: { ...s, status: "needs_review" },
@@ -467,7 +468,7 @@ export type DailyHrEmailResult =
  * failing.
  */
 export async function sendDailyHrEmail(recipient: DailyRecipient = { kind: "office" }): Promise<DailyHrEmailResult> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("reports.export");
   const company = await prisma.company.findFirst({ where: tenantWhere(ctx) });
   const tenantName = ctx.tenant.displayName || ctx.tenant.name || company?.name || "FabSheet";
 

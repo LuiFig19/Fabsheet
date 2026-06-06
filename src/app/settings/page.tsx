@@ -18,6 +18,7 @@ import {
   updateOcrSettings,
 } from "@/lib/settings-actions";
 import { DangerZone } from "./danger-zone";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ function startOfToday(): Date {
 }
 
 export default async function SettingsPage() {
+  await requirePermission("settings.view");
   const ctx = await getTenantContext();
   const tw = tenantWhere(ctx);
   const [company, employees, codes, descriptions, usage, entryCount, uploadCount, jobCount] = await Promise.all([

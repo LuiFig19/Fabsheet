@@ -2,14 +2,17 @@
 import { useState } from "react";
 import { AppSidebar, TopBar } from "./app-sidebar";
 import { CommandMenu } from "./command-menu";
+import type { NavModule } from "@/lib/access";
 
 export function AppShell({
   company,
   user,
+  modules,
   children,
 }: {
   company: string;
   user: { name: string | null; email: string; role: string } | null;
+  modules: NavModule[];
   children: React.ReactNode;
 }) {
   // Command palette opens on Cmd/Ctrl+K globally (wired inside CommandMenu).
@@ -24,14 +27,14 @@ export function AppShell({
 
   return (
     <div className="flex min-h-[100dvh] bg-muted/30">
-      <AppSidebar company={company} user={user} />
+      <AppSidebar company={company} user={user} modules={modules} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar title={company} company={company} user={user} onOpenCommand={openCommand} />
+        <TopBar title={company} company={company} user={user} modules={modules} onOpenCommand={openCommand} />
         <main className="flex-1 px-4 py-6 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-[1400px]">{children}</div>
         </main>
       </div>
-      <CommandMenu />
+      <CommandMenu modules={modules} />
     </div>
   );
 }

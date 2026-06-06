@@ -13,12 +13,14 @@ import { TASK_BUBBLES, ACTION_BUBBLES } from "@/lib/extractors/types";
 import { hardWarnings, softWarnings } from "@/lib/warnings";
 import { AlertTriangle, FileText, Info } from "lucide-react";
 import { PhotoPanel } from "./photo-panel";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReviewDetailPage({ params }: { params: Promise<{ uploadId: string }> }) {
   const { uploadId } = await params;
 
+  await requirePermission("timesheets.review");
   const ctx = await getTenantContext();
   const [upload, company, employees, jobs] = await Promise.all([
     prisma.timesheetUpload.findFirst({

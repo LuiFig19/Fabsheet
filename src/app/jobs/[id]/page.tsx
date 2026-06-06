@@ -8,11 +8,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { budgetTier, fmtHours, formatDate } from "@/lib/utils";
 import { getTenantContext, scopeWhere } from "@/lib/tenant";
 import { JobControls } from "./job-controls";
+import { canAccess, requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await requirePermission("jobs.view");
   const ctx = await getTenantContext();
   const job = await prisma.job.findFirst({
     where: { id, ...scopeWhere(ctx) },
@@ -25,6 +27,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     },
   });
   if (!job) notFound();
+  const canWriteJobs = canAccess(ctx.user?.role, "jobs.write") || process.env.AUTH_DISABLED === "true";
 
   const used = job.entries.reduce((s, e) => s + e.decimalHours, 0);
   const tier = budgetTier(used, job.budgetedHours);
@@ -90,7 +93,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         </CardContent>
       </Card>
 
-      <JobControls jobId={job.id} budgetedHours={job.budgetedHours} status={job.status} />
+      {canWriteJobs && <JobControls jobId={job.id} budgetedHours={job.budgetedHours} status={job.status} />}
 
       {unitRows.length > 0 && (
         <Card>

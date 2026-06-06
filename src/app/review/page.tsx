@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 import { getTenantContext, scopeWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 import { BulkApprove } from "./bulk-approve";
 import { DeleteUploadButton } from "./delete-upload-button";
 import { AlertTriangle, ClipboardCheck } from "lucide-react";
@@ -12,6 +13,7 @@ import { AlertTriangle, ClipboardCheck } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 export default async function ReviewQueuePage() {
+  await requirePermission("timesheets.review");
   const ctx = await getTenantContext();
   const uploads = await prisma.timesheetUpload.findMany({
     where: { ...scopeWhere(ctx), status: { in: ["needs_review", "approved", "uploaded"] } },

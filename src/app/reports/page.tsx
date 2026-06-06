@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { fmtHours } from "@/lib/utils";
 import { getTenantContext, tenantWhere } from "@/lib/tenant";
 import { ReportControls } from "./report-controls";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export default async function ReportsPage({
   const preset = sp.preset ?? "week";
   const group = (sp.group ?? "job") as "job" | "employee" | "code";
 
+  await requirePermission("reports.view");
   const ctx = await getTenantContext();
   const [data, company] = await Promise.all([
     buildReport(ctx, preset, group, sp.start, sp.end),

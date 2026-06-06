@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { buildReport, reportToCsv } from "@/lib/report";
 import { getTenantContext } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const preset = sp.get("preset") ?? "week";
   const groupBy = (sp.get("group") ?? "job") as "job" | "employee" | "code";
+  await requirePermission("reports.export");
   const ctx = await getTenantContext();
   const data = await buildReport(ctx, preset, groupBy, sp.get("start") ?? undefined, sp.get("end") ?? undefined);
   const csv = reportToCsv(data);

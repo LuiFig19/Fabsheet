@@ -5,6 +5,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { buildReport } from "@/lib/report";
 import { renderReportPdf } from "@/lib/report-pdf";
 import { getTenantContext, tenantWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 function resolveResendKey(company: { resendKeyEnc?: string | null } | null): string {
   if (process.env.RESEND_API_KEY) return process.env.RESEND_API_KEY;
@@ -19,6 +20,7 @@ export type EmailResult = { ok: boolean; message: string };
  * message so the UI can show it instead of crashing.
  */
 export async function emailReport(formData: FormData): Promise<EmailResult> {
+  await requirePermission("reports.export");
   const to = String(formData.get("to") ?? "").trim();
   const subject = String(formData.get("subject") ?? "Raven's Marine time report").trim();
   const message = String(formData.get("message") ?? "").trim();

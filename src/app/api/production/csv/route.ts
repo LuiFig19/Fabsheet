@@ -1,11 +1,13 @@
 import { NextRequest } from "next/server";
 import { buildProductionBreakdown, productionToCsv, resolveProductionRange } from "@/lib/production";
 import { getTenantContext } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
+  await requirePermission("production.view");
   const ctx = await getTenantContext();
   const range = resolveProductionRange({
     week: sp.get("week") ?? undefined,

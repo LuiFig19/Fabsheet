@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { prisma } from "@/lib/db";
 import { approvedHoursByJob } from "@/lib/queries";
 import { getTenantContext, scopeWhere, tenantWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 import {
   budgetTier,
   easternNow,
@@ -25,6 +26,7 @@ const HR_CUTOFF_HOUR = 18; // 6 PM Eastern
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  await requirePermission("dashboard.view");
   const ctx = await getTenantContext();
   const s = scopeWhere(ctx);
   const { weekStart, weekEnd, daysRemaining, onWeekend } = workWeekProgress();
@@ -353,4 +355,3 @@ function StatusBadge({ status }: { status: string }) {
   if (status === "uploaded") return <Badge variant="danger">extract failed</Badge>;
   return <Badge variant="warning">needs review</Badge>;
 }
-

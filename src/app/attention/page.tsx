@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { prisma } from "@/lib/db";
 import { detectAnomalies } from "@/lib/anomalies";
 import { getTenantContext, scopeWhere, tenantWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 import {
   fmtHours,
   formatDate,
@@ -19,6 +20,7 @@ export const dynamic = "force-dynamic";
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri"] as const;
 
 export default async function AttentionPage() {
+  await requirePermission("attention.view");
   const ctx = await getTenantContext();
   const s = scopeWhere(ctx);
   const { weekStart, weekEnd, daysRemaining, onWeekend } = workWeekProgress();

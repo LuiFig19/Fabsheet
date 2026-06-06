@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { buildReport } from "@/lib/report";
 import { renderReportPdf } from "@/lib/report-pdf";
 import { getTenantContext, tenantWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const preset = sp.get("preset") ?? "week";
   const groupBy = (sp.get("group") ?? "job") as "job" | "employee" | "code";
+  await requirePermission("reports.export");
   const ctx = await getTenantContext();
   const data = await buildReport(ctx, preset, groupBy, sp.get("start") ?? undefined, sp.get("end") ?? undefined);
   const company = await prisma.company.findFirst({ where: tenantWhere(ctx) });

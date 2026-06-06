@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { rangeFor } from "@/lib/queries";
 import { getTenantContext, scopeWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ function csvCell(v: string | number): string {
  * does today; this kills it.
  */
 export async function GET(req: NextRequest) {
+  await requirePermission("reports.export");
   const ctx = await getTenantContext();
   const sp = req.nextUrl.searchParams;
   const { start, end } = rangeFor(sp.get("preset") ?? "week", sp.get("start") ?? undefined, sp.get("end") ?? undefined);

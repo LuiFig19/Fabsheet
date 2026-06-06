@@ -1,11 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { UploadForm } from "./upload-form";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 // Pro plan: server actions on this route may take up to 60s.
 export const maxDuration = 60;
 
-export default function UploadPage() {
+export default async function UploadPage() {
+  await requirePermission("timesheets.upload");
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>

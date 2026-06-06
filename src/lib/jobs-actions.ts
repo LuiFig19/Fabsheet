@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { getTenantContext, scopeWhere, scopeStamp } from "@/lib/tenant";
+import { scopeWhere, scopeStamp } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 const jobSchema = z.object({
   workOrderNumber: z.string().min(1, "Work order number is required."),
@@ -15,7 +16,7 @@ const jobSchema = z.object({
 });
 
 export async function createJob(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("jobs.write");
   const parsed = jobSchema.safeParse(Object.fromEntries(formData.entries()));
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   await prisma.job.create({
@@ -35,7 +36,7 @@ export async function createJob(formData: FormData) {
 }
 
 export async function updateJobQuantity(jobId: string, quantity: number) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("jobs.write");
   await prisma.job.updateMany({
     where: { id: jobId, ...scopeWhere(ctx) },
     data: { quantity: Math.max(1, Math.round(quantity)) },
@@ -45,7 +46,7 @@ export async function updateJobQuantity(jobId: string, quantity: number) {
 }
 
 export async function updateJobBudget(jobId: string, budgetedHours: number) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("jobs.write");
   await prisma.job.updateMany({ where: { id: jobId, ...scopeWhere(ctx) }, data: { budgetedHours } });
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/jobs");
@@ -53,7 +54,7 @@ export async function updateJobBudget(jobId: string, budgetedHours: number) {
 }
 
 export async function setJobStatus(jobId: string, status: "active" | "complete" | "on_hold") {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("jobs.write");
   await prisma.job.updateMany({
     where: { id: jobId, ...scopeWhere(ctx) },
     data: { status, completedAt: status === "complete" ? new Date() : null },

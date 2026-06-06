@@ -3,11 +3,13 @@ import { prisma } from "@/lib/db";
 import { buildProductionBreakdown, resolveProductionRange } from "@/lib/production";
 import { renderProductionPdf } from "@/lib/production-pdf";
 import { getTenantContext, tenantWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
+  await requirePermission("production.view");
   const ctx = await getTenantContext();
   const range = resolveProductionRange({
     week: sp.get("week") ?? undefined,

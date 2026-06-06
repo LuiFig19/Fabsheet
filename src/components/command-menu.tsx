@@ -25,8 +25,9 @@ import {
 } from "lucide-react";
 import { signOut } from "@/lib/auth-client";
 import { useTheme } from "next-themes";
+import type { NavModule } from "@/lib/access";
 
-export function CommandMenu() {
+export function CommandMenu({ modules }: { modules: NavModule[] }) {
   const router = useRouter();
   const { setTheme } = useTheme();
   const [open, setOpen] = useState(false);
@@ -53,19 +54,22 @@ export function CommandMenu() {
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
         <CommandGroup heading="Go to">
-          <CommandItem onSelect={() => go("/dashboard")}><LayoutDashboard className="h-4 w-4" /> Dashboard</CommandItem>
-          <CommandItem onSelect={() => go("/attention")}><AlertTriangle className="h-4 w-4" /> Needs Attention</CommandItem>
-          <CommandItem onSelect={() => go("/upload")}><Upload className="h-4 w-4" /> Upload timesheet</CommandItem>
-          <CommandItem onSelect={() => go("/review")}><ClipboardCheck className="h-4 w-4" /> Review queue</CommandItem>
-          <CommandItem onSelect={() => go("/jobs")}><Briefcase className="h-4 w-4" /> Jobs</CommandItem>
-          <CommandItem onSelect={() => go("/production")}><Target className="h-4 w-4" /> Production breakdown</CommandItem>
-          <CommandItem onSelect={() => go("/reports")}><FileText className="h-4 w-4" /> Reports</CommandItem>
-          <CommandItem onSelect={() => go("/settings")}><Settings className="h-4 w-4" /> Settings</CommandItem>
+          {modules.map((m) => (
+            <CommandItem key={m.href} onSelect={() => go(m.href)}>
+              <CommandIcon keyName={m.key} /> {m.label}
+            </CommandItem>
+          ))}
         </CommandGroup>
         <CommandGroup heading="Quick actions">
-          <CommandItem onSelect={() => go("/reports?preset=week")}><Download className="h-4 w-4" /> Export this week</CommandItem>
-          <CommandItem onSelect={() => go("/reports?preset=last_week")}><Download className="h-4 w-4" /> Export last week</CommandItem>
-          <CommandItem onSelect={() => go("/settings#danger-zone")}><Settings className="h-4 w-4" /> Danger zone</CommandItem>
+          {modules.some((m) => m.href === "/reports") && (
+            <>
+              <CommandItem onSelect={() => go("/reports?preset=week")}><Download className="h-4 w-4" /> Export this week</CommandItem>
+              <CommandItem onSelect={() => go("/reports?preset=last_week")}><Download className="h-4 w-4" /> Export last week</CommandItem>
+            </>
+          )}
+          {modules.some((m) => m.href === "/settings") && (
+            <CommandItem onSelect={() => go("/settings#danger-zone")}><Settings className="h-4 w-4" /> Danger zone</CommandItem>
+          )}
         </CommandGroup>
         <CommandGroup heading="Appearance">
           <CommandItem onSelect={() => { setTheme("light"); setOpen(false); }}><Sun className="h-4 w-4" /> Light mode</CommandItem>
@@ -79,4 +83,15 @@ export function CommandMenu() {
       </CommandList>
     </CommandDialog>
   );
+}
+
+function CommandIcon({ keyName }: { keyName: string }) {
+  if (keyName === "upload") return <Upload className="h-4 w-4" />;
+  if (keyName === "review") return <ClipboardCheck className="h-4 w-4" />;
+  if (keyName === "jobs") return <Briefcase className="h-4 w-4" />;
+  if (keyName === "production") return <Target className="h-4 w-4" />;
+  if (keyName === "attention") return <AlertTriangle className="h-4 w-4" />;
+  if (keyName === "reports") return <FileText className="h-4 w-4" />;
+  if (keyName === "settings" || keyName === "admin") return <Settings className="h-4 w-4" />;
+  return <LayoutDashboard className="h-4 w-4" />;
 }

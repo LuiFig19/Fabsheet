@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { encryptSecret } from "@/lib/crypto";
 import { getTenantContext, scopeStamp, tenantStamp, tenantWhere } from "@/lib/tenant";
+import { requirePermission } from "@/lib/access";
 
 function revalidateAll() {
   revalidatePath("/");
@@ -36,6 +37,7 @@ async function companyId(): Promise<{ companyId: string; tenantId: string; divis
 }
 
 export async function updateCompany(formData: FormData) {
+  await requirePermission("settings.manage");
   const { companyId: id } = await companyId();
   await prisma.company.update({
     where: { id },
@@ -52,6 +54,7 @@ export async function updateCompany(formData: FormData) {
 }
 
 export async function updateOcrSettings(formData: FormData) {
+  await requirePermission("settings.manage");
   const { companyId: id } = await companyId();
   const threshold = Number(formData.get("ocrThreshold"));
   const cap = Number(formData.get("dailyApiCap"));
@@ -70,6 +73,7 @@ export async function updateOcrSettings(formData: FormData) {
 }
 
 export async function saveKeys(formData: FormData) {
+  await requirePermission("settings.manage");
   const { companyId: id } = await companyId();
   const anthropic = String(formData.get("anthropicKey") ?? "").trim();
   const resend = String(formData.get("resendKey") ?? "").trim();
@@ -81,7 +85,7 @@ export async function saveKeys(formData: FormData) {
 }
 
 export async function addEmployee(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   if (name) await prisma.employee.create({ data: { ...scopeStamp(ctx), name, email } });
@@ -91,7 +95,7 @@ export async function addEmployee(formData: FormData) {
 }
 
 export async function toggleEmployee(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const id = String(formData.get("id"));
   const e = await prisma.employee.findFirst({ where: { id, tenantId: ctx.tenant.id } });
   if (e) await prisma.employee.update({ where: { id }, data: { active: !e.active } });
@@ -102,7 +106,7 @@ export async function toggleEmployee(formData: FormData) {
 /** Set or clear the email address on one employee. Used by the recipient
  *  dropdown so the demo doesn't depend on a separate roster file. */
 export async function setEmployeeEmail(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const id = String(formData.get("id"));
   const email = String(formData.get("email") ?? "").trim();
   const e = await prisma.employee.findFirst({ where: { id, tenantId: ctx.tenant.id } });
@@ -112,7 +116,7 @@ export async function setEmployeeEmail(formData: FormData) {
 }
 
 export async function addLaborCode(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const code = String(formData.get("code") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   if (code && description) {
@@ -126,7 +130,7 @@ export async function addLaborCode(formData: FormData) {
 }
 
 export async function toggleLaborCode(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const id = String(formData.get("id"));
   const c = await prisma.laborCode.findFirst({ where: { id, tenantId: ctx.tenant.id } });
   if (c) await prisma.laborCode.update({ where: { id }, data: { active: !c.active } });
@@ -134,7 +138,7 @@ export async function toggleLaborCode(formData: FormData) {
 }
 
 export async function addDescription(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const name = String(formData.get("name") ?? "").trim();
   if (name) {
     await prisma.taskDescription.upsert({
@@ -147,7 +151,7 @@ export async function addDescription(formData: FormData) {
 }
 
 export async function toggleDescription(formData: FormData) {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const id = String(formData.get("id"));
   const d = await prisma.taskDescription.findFirst({ where: { id, tenantId: ctx.tenant.id } });
   if (d) await prisma.taskDescription.update({ where: { id }, data: { active: !d.active } });
@@ -162,7 +166,7 @@ export type DangerResult = { ok: true; deleted: Record<string, number> } | { ok:
 /** Wipe all timesheets (entries + uploads). Optionally also wipe Jobs.
  *  Names, codes, descriptions, settings, and API keys are NOT touched. */
 export async function clearTimesheets(includeJobs: boolean): Promise<DangerResult> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const tw = tenantWhere(ctx);
   const entries = await prisma.timesheetEntry.deleteMany({ where: tw });
   const uploads = await prisma.timesheetUpload.deleteMany({ where: tw });
@@ -177,7 +181,7 @@ export async function clearTimesheets(includeJobs: boolean): Promise<DangerResul
 /** Wipe all Employees. Nulls them out on any remaining entries/uploads first
  *  so the foreign-key constraint does not block. */
 export async function clearEmployees(): Promise<DangerResult> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const tw = tenantWhere(ctx);
   await prisma.timesheetEntry.updateMany({ where: tw, data: { employeeId: null } });
   await prisma.timesheetUpload.updateMany({ where: tw, data: { employeeId: null } });
@@ -188,7 +192,7 @@ export async function clearEmployees(): Promise<DangerResult> {
 }
 
 export async function clearLaborCodes(): Promise<DangerResult> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const r = await prisma.laborCode.deleteMany({ where: tenantWhere(ctx) });
   await danger("clear_labor_codes", { count: r.count });
   revalidateAll();
@@ -196,7 +200,7 @@ export async function clearLaborCodes(): Promise<DangerResult> {
 }
 
 export async function clearTaskDescriptions(): Promise<DangerResult> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const r = await prisma.taskDescription.deleteMany({ where: tenantWhere(ctx) });
   await danger("clear_task_descriptions", { count: r.count });
   revalidateAll();
@@ -206,6 +210,7 @@ export async function clearTaskDescriptions(): Promise<DangerResult> {
 /** Forget API keys stored in the Company row. Keys set via env vars still
  *  take precedence at runtime, so production keeps working. */
 export async function clearStoredKeys(): Promise<DangerResult> {
+  await requirePermission("settings.manage");
   const { companyId: id } = await companyId();
   await prisma.company.update({
     where: { id },
@@ -220,7 +225,7 @@ export async function clearStoredKeys(): Promise<DangerResult> {
  *  descriptions, stored keys, and the tenant's audit log + OCR cache.
  *  Tenant + division rows themselves stay (you would still be logged in). */
 export async function clearEverything(): Promise<DangerResult> {
-  const ctx = await getTenantContext();
+  const ctx = await requirePermission("settings.manage");
   const tw = tenantWhere(ctx);
   const entries = await prisma.timesheetEntry.deleteMany({ where: tw });
   const uploads = await prisma.timesheetUpload.deleteMany({ where: tw });

@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/app-shell";
+import { visibleModulesForRole } from "@/lib/access";
 
 const PRODUCT = process.env.NEXT_PUBLIC_APP_NAME || "FabSheet";
 
@@ -64,6 +65,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       ? { name: "Auth disabled", email: "(temp)", role: "browse-only" }
       : null;
   const showShell = authDisabled || Boolean(session && ctx);
+  const modules = visibleModulesForRole(authDisabled ? "owner" : user?.role);
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -71,7 +73,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ThemeProvider>
           <TooltipProvider delayDuration={150}>
             {showShell ? (
-              <AppShell company={company} user={user}>{children}</AppShell>
+              <AppShell company={company} user={user} modules={modules}>{children}</AppShell>
             ) : (
               <div className="min-h-[100dvh]">{children}</div>
             )}
