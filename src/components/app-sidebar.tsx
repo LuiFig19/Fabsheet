@@ -17,6 +17,7 @@ import {
   Menu,
   Search,
   Crown,
+  Landmark,
   Users,
   HardHat,
   ShieldCheck,
@@ -27,6 +28,7 @@ import type { NavModule, ModuleKey } from "@/lib/access";
 const ICONS: Record<ModuleKey, typeof LayoutDashboard> = {
   dashboard: LayoutDashboard,
   executive: Crown,
+  big_honcho: Landmark,
   attention: AlertTriangle,
   upload: Upload,
   review: ClipboardCheck,

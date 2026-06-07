@@ -48,9 +48,17 @@ async function main() {
   const t = tenant.id;
   const d = division.id;
 
-  // A seed admin user (only used in multi_tenant mode for magic-link login).
-  await prisma.user.create({
-    data: { tenantId: t, email: "luifig19@gmail.com", name: "Luis Figueroa", role: "admin" },
+  // Seed users for the real Raven's handoff: Tim -> Kaylee -> Jose -> owner.
+  await prisma.user.createMany({
+    data: [
+      { tenantId: t, email: "luifig19@gmail.com", name: "Luis Figueroa", role: "admin" },
+      { tenantId: t, email: "jeremiah@fanaticnode.com", name: "Jeremiah", role: "executive" },
+      { tenantId: t, email: "ravensmusic9@gmail.com", name: "Raven's Music", role: "manager" },
+      { tenantId: t, email: "tim@ravensmarine.local", name: "Tim Foreman", role: "foreman" },
+      { tenantId: t, email: "kaylee@ravensmarine.local", name: "Kaylee HR", role: "hr" },
+      { tenantId: t, email: "jose@ravensmarine.local", name: "Jose Verifier", role: "hr" },
+      { tenantId: t, email: "owner@ravensmarine.local", name: "Raven's Big Honcho", role: "manager" },
+    ],
   });
 
   await prisma.company.create({ data: { tenantId: t, name: COMPANY_NAME } });
@@ -247,6 +255,102 @@ async function main() {
     },
   });
 
+  // Foreman-approved sheet waiting for HR.
+  await prisma.timesheetUpload.create({
+    data: {
+      filePath: "seed/tim_ready_for_hr.jpg",
+      mimeType: "image/jpeg",
+      employeeId: emp("Luis Sanchez").id,
+      date: daysAgo(0),
+      status: "foreman_approved",
+      extractorName: "claude",
+      shiftStart: "05:00",
+      shiftEnd: "16:00",
+      warnings: [],
+      entries: {
+        create: [
+          {
+            employeeId: emp("Luis Sanchez").id,
+            jobId: job("4354").id,
+            workOrderNumber: "4354",
+            customerName: "RCCL RB1",
+            description: "Rails",
+            laborCode: "110 Weld/Fab",
+            startTime: "05:00",
+            endTime: "11:30",
+            decimalHours: h("05:00", "11:30"),
+            confidenceByField: {},
+            status: "foreman_approved",
+            approvedAt: new Date(),
+          },
+          {
+            employeeId: emp("Luis Sanchez").id,
+            jobId: job("4354").id,
+            workOrderNumber: "4354",
+            customerName: "RCCL RB1",
+            description: "Forklift material move",
+            laborCode: "230 Load/Unload",
+            startTime: "12:00",
+            endTime: "16:00",
+            decimalHours: h("12:00", "16:00"),
+            notes: "Moved rail bundles to bay 3.",
+            confidenceByField: {},
+            status: "foreman_approved",
+            approvedAt: new Date(),
+          },
+        ],
+      },
+    },
+  });
+
+  // HR-received sheet already in QuickBooks so Jose can verify against a clock file.
+  await prisma.timesheetUpload.create({
+    data: {
+      filePath: "seed/jose_qb_entered.jpg",
+      mimeType: "image/jpeg",
+      employeeId: emp("Jose Davila").id,
+      date: daysAgo(0),
+      status: "entered_in_quickbooks",
+      extractorName: "claude",
+      shiftStart: "05:00",
+      shiftEnd: "16:00",
+      warnings: [],
+      entries: {
+        create: [
+          {
+            employeeId: emp("Jose Davila").id,
+            jobId: job("4571").id,
+            workOrderNumber: "4571",
+            customerName: "Coco Cay",
+            description: "Fit-up",
+            laborCode: "280 Fit-Up/Install",
+            startTime: "05:00",
+            endTime: "12:00",
+            decimalHours: h("05:00", "12:00"),
+            confidenceByField: {},
+            status: "entered_in_quickbooks",
+            approvedAt: new Date(),
+          },
+          {
+            employeeId: emp("Jose Davila").id,
+            jobId: job("4571").id,
+            workOrderNumber: "4571",
+            customerName: "Coco Cay",
+            description: "Machine repair",
+            laborCode: "240 Welding Machine Repair",
+            startTime: "12:30",
+            endTime: "16:00",
+            decimalHours: h("12:30", "16:00"),
+            notes: "Welder feed issue.",
+            confidenceByField: {},
+            status: "entered_in_quickbooks",
+            approvedAt: new Date(),
+          },
+        ],
+      },
+    },
+  });
+
   // STILL EXTRACTING (edge state on dashboard).
   await prisma.timesheetUpload.create({
     data: {
@@ -267,6 +371,53 @@ async function main() {
   await prisma.job.updateMany({ where: { tenantId: null }, data: { tenantId: t, divisionId: d } });
   await prisma.timesheetUpload.updateMany({ where: { tenantId: null }, data: { tenantId: t, divisionId: d } });
   await prisma.timesheetEntry.updateMany({ where: { tenantId: null }, data: { tenantId: t, divisionId: d } });
+
+  const jose = await prisma.employee.findFirst({ where: { tenantId: t, name: "Jose Davila" } });
+  if (jose) {
+    await prisma.auditLog.createMany({
+      data: [
+        {
+          tenantId: t,
+          entityType: "TimesheetEntry",
+          entityId: "seed-correction",
+          action: "request_correction",
+          after: { employeeName: "Glenn Swinger", reason: "Work order number needed confirmation before approval." },
+        },
+        {
+          tenantId: t,
+          entityType: "TimesheetUpload",
+          entityId: "seed-hr-submit",
+          action: "submit_to_hr",
+          after: { date: daysAgo(0).toISOString(), totalHours: 10.5 },
+        },
+        {
+          tenantId: t,
+          entityType: "QuickBooksExport",
+          entityId: "seed-qb",
+          action: "entered_in_quickbooks",
+          after: { enteredBy: "Kaylee HR", exportType: "QuickBooks-ready CSV" },
+        },
+        {
+          tenantId: t,
+          entityType: "TimeClockVerification",
+          entityId: `${jose.id}:${daysAgo(0).toISOString().slice(0, 10)}`,
+          action: "verify_time_clock",
+          after: {
+            employeeId: jose.id,
+            employeeName: jose.name,
+            date: daysAgo(0).toISOString().slice(0, 10),
+            clockHours: 11,
+            productionHours: 10.5,
+            difference: 0.5,
+            status: "warning",
+            notes: "Seeded clock comparison example.",
+            verifiedBy: "Jose Verifier",
+            verifiedAt: new Date().toISOString(),
+          },
+        },
+      ],
+    });
+  }
 
   const counts = {
     tenant: tenant.slug,

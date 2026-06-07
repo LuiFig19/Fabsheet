@@ -127,13 +127,13 @@ export default function RootIndex() {
               Built around the way your company actually works
             </div>
             <h1 className="mt-6 max-w-3xl text-5xl font-black leading-[.96] tracking-[-0.055em] text-white sm:text-6xl lg:text-7xl">
-              One platform.
+              Stop chasing paper.
               <span className="block bg-gradient-to-r from-cyan-200 via-blue-200 to-emerald-200 bg-clip-text text-transparent">
-                A custom version for every company.
+                Turn timesheets into job-costing data.
               </span>
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-              FabSheet turns company-specific workflows into secure operations software: time capture, review, job costing, HR exports, executive dashboards, reports, and portfolio rollups under one roof.
+              FabSheet moves labor hours from foreman review to HR, QuickBooks-ready exports, time-clock verification, owner reporting, and executive rollups in one secure workflow.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg" className="h-12 bg-cyan-300 px-5 text-[#06111f] hover:bg-cyan-200">
@@ -165,6 +165,28 @@ export default function RootIndex() {
           <Reveal delay={0.16}>
             <Capability icon={<Sparkles className="h-5 w-5" />} title="Custom without enterprise pricing" body="The platform foundation is reusable, so clients get a tailored system without paying agency-level custom software prices." />
           </Reveal>
+        </div>
+      </section>
+
+      <section className="relative border-b border-white/10 bg-[#071827] py-16">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <Reveal className="max-w-4xl">
+            <p className="text-xs font-bold uppercase tracking-[.25em] text-cyan-300">Real shop workflow</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Paper timesheets to payroll-ready operations data.</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-400">
+              Built for shops that still run on paper, spreadsheets, and manual approvals. FabSheet keeps the process familiar while removing the repeated math, re-entry, and “who has the sheet?” chasing.
+            </p>
+          </Reveal>
+          <div className="mt-8 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+            {["Paper timesheets", "Foreman review", "HR payroll entry", "QuickBooks-ready export", "Time clock verification", "Boss summaries"].map((step, index) => (
+              <Reveal key={step} delay={index * 0.04}>
+                <div className="h-full rounded-2xl border border-white/10 bg-white/[.04] p-4">
+                  <div className="text-xs font-bold uppercase tracking-[.18em] text-emerald-300">0{index + 1}</div>
+                  <div className="mt-3 text-sm font-black">{step}</div>
+                </div>
+              </Reveal>
+            ))}
+          </div>
         </div>
       </section>
 

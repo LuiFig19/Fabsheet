@@ -21,11 +21,13 @@ export type Permission =
   | "modules.view"
   | "hr.view"
   | "foreman.view"
+  | "big_honcho.view"
   | "executive.view";
 
 export type ModuleKey =
   | "dashboard"
   | "executive"
+  | "big_honcho"
   | "attention"
   | "upload"
   | "review"
@@ -51,6 +53,7 @@ export type NavModule = {
 export const NAV_MODULES: NavModule[] = [
   { key: "dashboard", href: "/dashboard", label: "Dashboard", permission: "dashboard.view", exact: true },
   { key: "executive", href: "/executive", label: "Executive", permission: "executive.view" },
+  { key: "big_honcho", href: "/big-honcho", label: "Big Honcho", permission: "big_honcho.view" },
   { key: "attention", href: "/attention", label: "Needs Attention", permission: "attention.view" },
   { key: "upload", href: "/upload", label: "Upload", permission: "timesheets.upload" },
   { key: "review", href: "/review", label: "Review", permission: "timesheets.review" },
@@ -69,12 +72,12 @@ const ROLE_PERMISSIONS: Record<AppRole, Permission[]> = {
   owner: [
     "dashboard.view", "executive.view", "attention.view", "timesheets.upload", "timesheets.review", "timesheets.delete",
     "jobs.view", "jobs.write", "production.view", "reports.view", "reports.export", "settings.view",
-    "settings.manage", "admin.users", "modules.view", "hr.view", "foreman.view",
+    "settings.manage", "admin.users", "modules.view", "hr.view", "foreman.view", "big_honcho.view",
   ],
   manager: [
     "dashboard.view", "executive.view", "attention.view", "timesheets.upload", "timesheets.review", "timesheets.delete",
     "jobs.view", "jobs.write", "production.view", "reports.view", "reports.export", "settings.view",
-    "settings.manage", "modules.view", "hr.view", "foreman.view",
+    "settings.manage", "modules.view", "hr.view", "foreman.view", "big_honcho.view",
   ],
   foreman: [
     "dashboard.view", "attention.view", "timesheets.upload", "timesheets.review", "jobs.view", "jobs.write",
