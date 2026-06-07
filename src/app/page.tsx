@@ -133,7 +133,7 @@ export default function RootIndex() {
               </span>
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-              FabSheet turns company-specific workflows into secure operations software: time capture, review, job costing, HR exports, executive dashboards, reports, and future modules under one roof.
+              FabSheet turns company-specific workflows into secure operations software: time capture, review, job costing, HR exports, executive dashboards, reports, and portfolio rollups under one roof.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg" className="h-12 bg-cyan-300 px-5 text-[#06111f] hover:bg-cyan-200">
@@ -284,7 +284,7 @@ export default function RootIndex() {
               <p className="text-xs font-bold uppercase tracking-[.25em] text-emerald-300">Security built in</p>
               <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Leadership can see the business without exposing the wrong data.</h2>
               <p className="mt-4 text-sm leading-7 text-slate-400">
-                FabSheet is designed for multiple companies and multiple divisions under one platform. Access is tenant-scoped, secrets are encrypted, routes are protected, and leadership views summarize performance without turning every employee record into an open file.
+                FabSheet is designed for holding companies with multiple operating companies and divisions under one platform. Access is tenant-scoped, secrets are encrypted, routes are protected, and leadership views summarize performance without turning every employee record into an open file.
               </p>
             </div>
           </Reveal>
