@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // Paths that never require an authenticated session.
-const PUBLIC = ["/login", "/api/auth", "/api/health", "/api/diagnose", "/api/test-send", "/api/test-magic-link", "/api/whoami", "/api/clear-verifications", "/api/cron"];
+const PUBLIC = ["/", "/login", "/api/auth", "/api/health", "/api/diagnose", "/api/test-send", "/api/test-magic-link", "/api/whoami", "/api/clear-verifications", "/api/cron"];
 
 // Middleware after basePath has been stripped. In single_tenant mode the
 // access prefix is enforced by basePath (Next 404s bare paths), so here we:
@@ -23,7 +23,7 @@ const SESSION_COOKIE_NAMES = [
 export function middleware(req: NextRequest) {
   const mode = process.env.APP_MODE === "multi_tenant" ? "multi_tenant" : "single_tenant";
   const { pathname } = req.nextUrl;
-  const isPublic = PUBLIC.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  const isPublic = PUBLIC.some((p) => pathname === p || (p !== "/" && pathname.startsWith(p + "/")));
 
   const headers = new Headers(req.headers);
   if (mode === "single_tenant") headers.set("x-tenant-slug", process.env.DEFAULT_TENANT_SLUG || "ravens");

@@ -2,13 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react", () => ({ cache: <T extends (...args: never[]) => unknown>(fn: T) => fn }));
 
-import { canAccess, normalizeRole, visibleModulesForRole } from "./access";
+import { canAccess, isOwnerEmail, normalizeRole, visibleModulesForRole } from "./access";
 
 describe("role access", () => {
   it("normalizes leadership aliases to owner", () => {
     expect(normalizeRole("President")).toBe("owner");
     expect(normalizeRole("Executive Admin")).toBe("owner");
     expect(canAccess("President", "admin.users")).toBe(true);
+  });
+
+  it("keeps the platform owner email on owner access", () => {
+    expect(isOwnerEmail("Luifig19@gmail.com")).toBe(true);
   });
 
   it("keeps foremen out of HR and admin controls", () => {

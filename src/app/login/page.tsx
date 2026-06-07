@@ -109,7 +109,7 @@ export default async function LoginPage({
           </ul>
 
           <div className="mt-10 hidden lg:block">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Sign-in is by invitation only</div>
+            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Secure account access by invitation</div>
           </div>
         </section>
 
@@ -118,16 +118,16 @@ export default async function LoginPage({
           <div className="w-full max-w-sm">
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] backdrop-blur sm:p-8">
               <div className="mb-5 space-y-1.5">
-                <h2 className="text-xl font-semibold tracking-tight text-white">Sign in</h2>
+                <h2 className="text-xl font-semibold tracking-tight text-white">Create account or sign in</h2>
                 <p className="text-sm text-slate-400">
-                  We&apos;ll email you a one-tap sign-in link. No password to remember.
+                  Enter an approved company email. We&apos;ll send a secure BetterAuth link that creates or opens your account.
                 </p>
               </div>
               <LoginForm nextUrl={next ?? "/dashboard"} initialError={error ?? null} />
             </div>
 
             <p className="mt-5 text-center text-xs text-slate-500 lg:hidden">
-              Sign-in is by invitation only. Trouble getting in? Contact your administrator.
+              Secure access is by invitation only. Trouble getting in? Contact your administrator.
             </p>
           </div>
         </section>

@@ -111,9 +111,17 @@ export function visibleModulesForRole(role: string | null | undefined): NavModul
   return NAV_MODULES.filter((m) => allowed.has(m.permission));
 }
 
+export function isOwnerEmail(email: string | null | undefined): boolean {
+  const configured = (process.env.OWNER_EMAILS ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set([...configured, "luifig19@gmail.com"]).has((email ?? "").trim().toLowerCase());
+}
+
 export const getAccessContext = cache(async (): Promise<TenantContext & { role: AppRole; permissions: Set<Permission> }> => {
   const ctx = await getTenantContext();
-  const role = process.env.AUTH_DISABLED === "true" ? "owner" : normalizeRole(ctx.user?.role);
+  const role = process.env.AUTH_DISABLED === "true" || isOwnerEmail(ctx.user?.email) ? "owner" : normalizeRole(ctx.user?.role);
   return { ...ctx, role, permissions: permissionsForRole(role) };
 });
 

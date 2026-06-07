@@ -50,7 +50,7 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
         <div className="space-y-1.5">
           <h3 className="text-base font-semibold text-white">Check your email</h3>
           <p className="text-sm leading-relaxed text-slate-400">
-            If <span className="font-medium text-slate-200">{recipient}</span> has access, a sign-in link is on its way. The link expires in 15 minutes.
+            If <span className="font-medium text-slate-200">{recipient}</span> has access, a secure account link is on its way. The link expires in 15 minutes.
           </p>
         </div>
         <button
@@ -85,7 +85,7 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
         className="h-12 w-full bg-white text-base font-semibold text-slate-900 shadow-lg shadow-blue-500/10 transition-all hover:bg-slate-100 hover:shadow-blue-500/20 disabled:opacity-80"
       >
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-        {pending ? "Sending sign-in link..." : "Email me a sign-in link"}
+        {pending ? "Sending secure link..." : "Email me a secure account link"}
       </Button>
       {error && (
         <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-2.5 text-sm text-red-200">
