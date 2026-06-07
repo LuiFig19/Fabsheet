@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { getTenantContext, type TenantContext } from "@/lib/tenant";
+import { isOwnerEmail } from "@/lib/platform-emails";
 
 export type AppRole = "owner" | "manager" | "foreman" | "hr" | "office" | "viewer";
 
@@ -109,14 +110,6 @@ export function canAccess(role: string | null | undefined, permission: Permissio
 export function visibleModulesForRole(role: string | null | undefined): NavModule[] {
   const allowed = permissionsForRole(role);
   return NAV_MODULES.filter((m) => allowed.has(m.permission));
-}
-
-export function isOwnerEmail(email: string | null | undefined): boolean {
-  const configured = (process.env.OWNER_EMAILS ?? "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-  return new Set([...configured, "luifig19@gmail.com"]).has((email ?? "").trim().toLowerCase());
 }
 
 export const getAccessContext = cache(async (): Promise<TenantContext & { role: AppRole; permissions: Set<Permission> }> => {

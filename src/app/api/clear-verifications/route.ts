@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { isAllowedEmail } from "@/lib/platform-emails";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +13,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const email = (req.nextUrl.searchParams.get("email") ?? "").trim().toLowerCase();
   if (!email) return NextResponse.json({ ok: false, error: "missing ?email=" }, { status: 400 });
-  const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (!allowed.includes(email)) {
-    return NextResponse.json({ ok: false, error: "email not in ALLOWED_EMAILS" }, { status: 403 });
+  if (!isAllowedEmail(email)) {
+    return NextResponse.json({ ok: false, error: "email is not approved for sign-in" }, { status: 403 });
   }
   const r = await prisma.verification.deleteMany({ where: { identifier: email } });
   return NextResponse.json({ ok: true, deleted: r.count, email });

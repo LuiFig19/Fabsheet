@@ -3,6 +3,7 @@ import { magicLink } from "better-auth/plugins";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { Resend } from "resend";
 import { prisma } from "@/lib/db";
+import { isAllowedEmail } from "@/lib/platform-emails";
 
 // ---------------------------------------------------------------------------
 // Config helpers
@@ -22,15 +23,6 @@ function resolveBaseURL(): string {
 }
 
 export const BASE_URL = resolveBaseURL();
-
-function allowlistOK(email: string): boolean {
-  if ((process.env.AUTH_MODE ?? "allowlist") !== "allowlist") return true;
-  const list = (process.env.ALLOWED_EMAILS ?? "")
-    .split(/[\s,;]+/)
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return list.length === 0 || list.includes(email.trim().toLowerCase());
-}
 
 /** Send the magic-link email through Resend. Inlined here (no indirection) so
  *  the whole send path is one function. Throws on failure so BetterAuth surfaces
@@ -118,9 +110,9 @@ export const auth = betterAuth({
     magicLink({
       expiresIn: 15 * 60,
       sendMagicLink: async ({ email, url }) => {
-        if (!allowlistOK(email)) {
+        if (!isAllowedEmail(email)) {
           console.log(`[auth] ${email} not allowlisted; skipping send.`);
-          throw new Error("That email is not allowed to sign in. Add it to ALLOWED_EMAILS in Vercel, then redeploy.");
+          throw new Error("That email is not approved for FabSheet sign-in.");
         }
         await sendMagicLinkEmail(email, url);
       },

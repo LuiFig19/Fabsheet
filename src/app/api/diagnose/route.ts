@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { allowedEmails } from "@/lib/platform-emails";
 
 export const dynamic = "force-dynamic";
 
@@ -8,10 +9,7 @@ export const dynamic = "force-dynamic";
 // under the access prefix so unauthenticated readers can hit it during
 // initial setup before any account is signed in.
 export async function GET() {
-  const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(/[\s,;]+/)
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+  const allowed = allowedEmails();
 
   let dbOk = false;
   let userCount = 0;

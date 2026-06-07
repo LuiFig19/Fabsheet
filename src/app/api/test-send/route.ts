@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendMagicLinkEmail } from "@/lib/email";
+import { isAllowedEmail } from "@/lib/platform-emails";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +16,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "missing ?email=..." }, { status: 400 });
   }
 
-  const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(/[\s,;]+/)
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  if (!allowed.includes(email)) {
-    return NextResponse.json({ ok: false, error: "email not in ALLOWED_EMAILS" }, { status: 403 });
+  if (!isAllowedEmail(email)) {
+    return NextResponse.json({ ok: false, error: "email is not approved for sign-in" }, { status: 403 });
   }
 
   const fakeUrl = `${process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL || ""}/api/auth/test-link`;

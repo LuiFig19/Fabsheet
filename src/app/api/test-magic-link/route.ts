@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { BASE_URL, auth } from "@/lib/auth";
+import { isAllowedEmail } from "@/lib/platform-emails";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,8 @@ export async function GET(req: NextRequest) {
   const email = (req.nextUrl.searchParams.get("email") ?? "").trim().toLowerCase();
   if (!email) return NextResponse.json({ ok: false, error: "missing ?email=" }, { status: 400 });
 
-  const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(/[\s,;]+/)
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  if (!allowed.includes(email)) {
-    return NextResponse.json({ ok: false, error: "email not in ALLOWED_EMAILS" }, { status: 403 });
+  if (!isAllowedEmail(email)) {
+    return NextResponse.json({ ok: false, error: "email is not approved for sign-in" }, { status: 403 });
   }
 
   try {
@@ -36,7 +33,7 @@ export async function GET(req: NextRequest) {
         { status: 500 },
       );
     }
-    const callbackURL = `${process.env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? ""}/dashboard`;
+    const callbackURL = `${BASE_URL}/dashboard`;
     const result = await fn({
       body: { email, callbackURL },
       headers: req.headers,
