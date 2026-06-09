@@ -1,8 +1,12 @@
 import { prisma } from "@/lib/db";
+import { getDrizzleDb } from "@/lib/drizzle/client";
+import { auditLog, ocrCache } from "@/lib/drizzle/schema";
 import { decryptSecret, sha256 } from "@/lib/crypto";
 import { ClaudeVisionExtractor, compressForVision } from "./claude";
 import { MockExtractor } from "./mock";
 import { extractedTimesheetSchema, type ExtractedTimesheet, type TimesheetExtractor } from "./types";
+import { eq } from "drizzle-orm";
+import { randomUUID } from "crypto";
 
 // 45s gives a comfortable margin: typical Vision scans land 8-15s, the
 // double-scan path runs in parallel so wall-clock stays at one scan, and the
@@ -18,12 +22,21 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 export type { ExtractedTimesheet, ExtractedRow, ExtractedHeader, TimesheetExtractor } from "./types";
 
-// Sonnet pricing (USD per token). Used to estimate cost in the API usage view.
-const COST_PER_INPUT_TOKEN = 3 / 1_000_000;
-const COST_PER_OUTPUT_TOKEN = 15 / 1_000_000;
+type Price = { input: number; output: number };
+const MODEL_PRICES: { match: RegExp; price: Price }[] = [
+  { match: /haiku-4-5|haiku-4\.5/i, price: { input: 1 / 1_000_000, output: 5 / 1_000_000 } },
+  { match: /sonnet/i, price: { input: 3 / 1_000_000, output: 15 / 1_000_000 } },
+  { match: /opus-4\.[5-9]|opus-4-[5-9]|opus-4_[5-9]/i, price: { input: 5 / 1_000_000, output: 25 / 1_000_000 } },
+  { match: /opus/i, price: { input: 15 / 1_000_000, output: 75 / 1_000_000 } },
+];
 
-export function estimateCost(inputTokens: number, outputTokens: number): number {
-  return inputTokens * COST_PER_INPUT_TOKEN + outputTokens * COST_PER_OUTPUT_TOKEN;
+function priceForModel(model: string): Price {
+  return MODEL_PRICES.find((m) => m.match.test(model))?.price ?? MODEL_PRICES[1].price;
+}
+
+export function estimateCost(inputTokens: number, outputTokens: number, modelName = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6"): number {
+  const price = priceForModel(modelName);
+  return inputTokens * price.input + outputTokens * price.output;
 }
 
 /** Resolve the Anthropic key: env wins, then the encrypted Settings value. */
@@ -33,7 +46,8 @@ export async function resolveAnthropicKey(): Promise<string> {
   return decryptSecret(company?.anthropicKeyEnc);
 }
 
-const model = () => process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
+const primaryModel = () => process.env.OCR_PRIMARY_MODEL ?? "claude-haiku-4-5-20251001";
+const verificationModel = () => process.env.OCR_VERIFICATION_MODEL ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
 /**
  * Build the configured extractor. EXTRACTOR=mock forces the dev extractor;
@@ -45,11 +59,10 @@ async function getExtractor(): Promise<TimesheetExtractor> {
   const choice = (process.env.EXTRACTOR ?? "claude").toLowerCase();
   if (choice === "mock") return new MockExtractor();
   const key = await resolveAnthropicKey();
-  // Double-scan (read each sheet twice and reconcile) is ON unless explicitly
-  // disabled. Trades ~2x Vision cost for materially better accuracy + better
-  // flagging of uncertain handwriting.
+  // Adaptive verification is ON unless explicitly disabled. Clean sheets use
+  // one fast Haiku pass; uncertain sheets get a second Sonnet pass and merge.
   const doubleScan = (process.env.OCR_DOUBLE_SCAN ?? "true").toLowerCase() !== "false";
-  return new ClaudeVisionExtractor(key, model(), doubleScan);
+  return new ClaudeVisionExtractor(key, primaryModel(), doubleScan, verificationModel());
 }
 
 function startOfToday(): Date {
@@ -77,11 +90,12 @@ export async function runExtraction(file: Buffer, mimeType: string, tenantId?: s
   // Compress phone photos to a Vision-friendly size BEFORE hashing - saves
   // 3-8s per call and makes the cache key match what we actually send.
   const compressed = await compressForVision(file, mimeType);
+  const drizzleDb = getDrizzleDb();
   const hash = sha256(compressed.buffer);
   const usingMockEnv = (process.env.EXTRACTOR ?? "claude").toLowerCase() === "mock";
 
   // 1. cache (keyed by content hash of the compressed bytes)
-  const cached = await prisma.ocrCache.findUnique({ where: { fileHash: hash } });
+  const cached = await drizzleDb.query.ocrCache.findFirst({ where: eq(ocrCache.fileHash, hash) });
   if (cached) {
     const parsed = extractedTimesheetSchema.safeParse(cached.resultJson);
     if (parsed.success) return { result: parsed.data, source: "cache", cappedFallback: false };
@@ -98,8 +112,13 @@ export async function runExtraction(file: Buffer, mimeType: string, tenantId?: s
       where: { action: "ocr_call", createdAt: { gte: startOfToday() }, ...(tenantId ? { tenantId } : {}) },
     });
     if (callsToday >= cap) {
-      await prisma.auditLog.create({
-        data: { tenantId, entityType: "Ocr", entityId: hash, action: "ocr_cap_block", after: { cap, callsToday } },
+      await drizzleDb.insert(auditLog).values({
+        id: randomUUID(),
+        tenantId,
+        entityType: "Ocr",
+        entityId: hash,
+        action: "ocr_cap_block",
+        after: { cap, callsToday },
       });
       const mock = new MockExtractor();
       const result = await mock.extract(compressed.buffer, compressed.mimeType);
@@ -113,24 +132,24 @@ export async function runExtraction(file: Buffer, mimeType: string, tenantId?: s
 
   if (extractor.lastUsage) {
     const { inputTokens, outputTokens, model: usedModel } = extractor.lastUsage;
-    await prisma.auditLog.create({
-      data: {
-        tenantId,
-        entityType: "Ocr",
-        entityId: hash,
-        action: "ocr_call",
-        inputTokens,
-        outputTokens,
-        costUsd: estimateCost(inputTokens, outputTokens),
-        model: usedModel,
-      },
+    await drizzleDb.insert(auditLog).values({
+      id: randomUUID(),
+      tenantId,
+      entityType: "Ocr",
+      entityId: hash,
+      action: "ocr_call",
+      inputTokens,
+      outputTokens,
+      costUsd: estimateCost(inputTokens, outputTokens, usedModel),
+      model: usedModel,
     });
     // cache real results only
-    await prisma.ocrCache.upsert({
-      where: { fileHash: hash },
-      create: { fileHash: hash, model: usedModel, resultJson: result },
-      update: { resultJson: result, model: usedModel },
-    });
+    const existing = await drizzleDb.query.ocrCache.findFirst({ where: eq(ocrCache.fileHash, hash), columns: { id: true } });
+    if (existing) {
+      await drizzleDb.update(ocrCache).set({ resultJson: result, model: usedModel }).where(eq(ocrCache.fileHash, hash));
+    } else {
+      await drizzleDb.insert(ocrCache).values({ id: randomUUID(), fileHash: hash, model: usedModel, resultJson: result });
+    }
   }
 
   return { result, source: extractor.name === "claude" ? "claude" : "mock", cappedFallback: false };

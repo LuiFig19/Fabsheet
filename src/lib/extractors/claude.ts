@@ -58,15 +58,17 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
   lastUsage: ExtractorUsage | null = null;
 
   private client: Anthropic;
-  private model: string;
+  private primaryModel: string;
+  private verificationModel: string;
   private doubleScan: boolean;
 
-  constructor(apiKey: string, model: string, doubleScan = true) {
+  constructor(apiKey: string, primaryModel: string, doubleScan = true, verificationModel = primaryModel) {
     if (!apiKey) {
       throw new Error("ANTHROPIC_API_KEY is not set. Add it in Settings to enable Claude Vision OCR.");
     }
     this.client = new Anthropic({ apiKey });
-    this.model = model;
+    this.primaryModel = primaryModel;
+    this.verificationModel = verificationModel;
     this.doubleScan = doubleScan;
   }
 
@@ -83,51 +85,47 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
   }
 
   /**
-   * Public entry point. With double-scan enabled (default) the same image is
-   * read twice in independent calls and the two readings are reconciled: fields
-   * that agree get a small confidence boost, fields that disagree are kept at a
-   * low confidence so the Review screen flags them for a human. This catches
-   * the handwriting the model is genuinely unsure about instead of silently
-   * trusting one pass. If the second pass errors we fall back to the first.
+   * Public entry point. With adaptive verification enabled (default), Haiku
+   * reads the sheet first. Clean, confident sheets return immediately. Messier
+   * sheets get a second Sonnet verification pass and the two readings are
+   * reconciled so disagreements are pushed below the review threshold.
    */
   async extract(file: Buffer, mimeType: string): Promise<ExtractedTimesheet> {
     if (!this.doubleScan) {
-      const only = await this.scanOnce(file, mimeType);
-      this.lastUsage = { inputTokens: only.inputTokens, outputTokens: only.outputTokens, model: this.model };
+      const only = await this.scanOnce(file, mimeType, "primary", this.primaryModel);
+      this.lastUsage = { inputTokens: only.inputTokens, outputTokens: only.outputTokens, model: this.primaryModel };
       return only.result;
     }
 
-    // CRITICAL: parallel, not sequential. With two ~10-15s Vision calls in
-    // series we used to blow past the 30s upload timeout; in parallel the
-    // wall-clock is max(t1, t2) instead of t1+t2 so the upload completes in
-    // about the same time as a single-scan extract.
-    const [r1, r2] = await Promise.allSettled([
-      this.scanOnce(file, mimeType, "primary"),
-      this.scanOnce(file, mimeType, "verification"),
-    ]);
+    const mode = (process.env.OCR_VERIFY_MODE ?? "adaptive").toLowerCase();
+    const first = await this.scanOnce(file, mimeType, "primary", this.primaryModel);
+    const needsVerification = mode === "always" || (mode !== "never" && sheetNeedsVerification(first.result));
 
-    const first = r1.status === "fulfilled" ? r1.value : null;
-    const second = r2.status === "fulfilled" ? r2.value : null;
+    if (!needsVerification) {
+      this.lastUsage = { inputTokens: first.inputTokens, outputTokens: first.outputTokens, model: this.primaryModel };
+      return first.result;
+    }
 
-    if (first && second) {
+    let second: ScanResult | null = null;
+    try {
+      second = await this.scanOnce(file, mimeType, "verification", this.verificationModel);
+    } catch {
+      second = null;
+    }
+    if (second) {
       this.lastUsage = {
         inputTokens: first.inputTokens + second.inputTokens,
         outputTokens: first.outputTokens + second.outputTokens,
-        model: this.model,
+        model: this.primaryModel === this.verificationModel ? this.primaryModel : `${this.primaryModel}+${this.verificationModel}`,
       };
       return mergeScans(first.result, second.result);
     }
-    const only = first ?? second;
-    if (!only) {
-      const err = r1.status === "rejected" ? r1.reason : r2.status === "rejected" ? r2.reason : new Error("OCR failed");
-      throw err instanceof Error ? err : new Error(String(err));
-    }
-    this.lastUsage = { inputTokens: only.inputTokens, outputTokens: only.outputTokens, model: this.model };
-    return only.result;
+    this.lastUsage = { inputTokens: first.inputTokens, outputTokens: first.outputTokens, model: this.primaryModel };
+    return first.result;
   }
 
   /** One full read (with the existing single-retry-on-invalid-schema loop). */
-  private async scanOnce(file: Buffer, mimeType: string, mode: "primary" | "verification" = "primary"): Promise<ScanResult> {
+  private async scanOnce(file: Buffer, mimeType: string, mode: "primary" | "verification" = "primary", model = this.primaryModel): Promise<ScanResult> {
     const source = this.buildSource(file, mimeType);
 
     const baseUserContent = [
@@ -154,7 +152,7 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
       }
 
       const resp = await this.client.messages.create({
-        model: this.model,
+        model,
         max_tokens: 4096,
         system: VISION_SYSTEM_PROMPT,
         tools: [TIMESHEET_TOOL as unknown as Anthropic.Tool],
@@ -181,3 +179,26 @@ export class ClaudeVisionExtractor implements TimesheetExtractor {
 }
 
 type ScanResult = { result: ExtractedTimesheet; inputTokens: number; outputTokens: number };
+
+function sheetNeedsVerification(sheet: ExtractedTimesheet): boolean {
+  if ((sheet.warnings ?? []).length > 0) return true;
+
+  const confidences: number[] = [
+    sheet.header.employeeName.confidence,
+    sheet.header.date.confidence,
+  ];
+  for (const row of sheet.rows) {
+    if (!row) continue;
+    confidences.push(
+      row.jobNumber.confidence,
+      row.unitNumber.confidence,
+      row.unitTotal.confidence,
+      row.startedTime.confidence,
+      row.finishedTime.confidence,
+      row.taskBubble.confidence,
+      row.actionBubble.confidence,
+      row.notes.confidence,
+    );
+  }
+  return confidences.some((c) => c > 0 && c < Number(process.env.OCR_VERIFY_CONFIDENCE ?? 0.78));
+}
