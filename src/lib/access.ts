@@ -117,7 +117,7 @@ export function visibleModulesForRole(role: string | null | undefined): NavModul
 
 export const getAccessContext = cache(async (): Promise<TenantContext & { role: AppRole; permissions: Set<Permission> }> => {
   const ctx = await getTenantContext();
-  const role = process.env.AUTH_DISABLED === "true" || isOwnerEmail(ctx.user?.email) ? "owner" : normalizeRole(ctx.user?.role);
+  const role = process.env.AUTH_DISABLED === "true" || isOwnerEmail(ctx.user?.email) ? "owner" : normalizeRole(ctx.role ?? ctx.user?.role);
   return { ...ctx, role, permissions: permissionsForRole(role) };
 });
 

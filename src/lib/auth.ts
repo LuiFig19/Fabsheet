@@ -3,7 +3,7 @@ import { magicLink } from "better-auth/plugins";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { Resend } from "resend";
 import { prisma } from "@/lib/db";
-import { isAllowedEmail } from "@/lib/platform-emails";
+import { isSignInEmailAllowed } from "@/lib/platform-emails";
 
 // ---------------------------------------------------------------------------
 // Config helpers
@@ -124,7 +124,7 @@ export const auth = betterAuth({
     magicLink({
       expiresIn: 15 * 60,
       sendMagicLink: async ({ email, url }) => {
-        if (!isAllowedEmail(email)) {
+        if (!(await isSignInEmailAllowed(email))) {
           console.log(`[auth] ${email} not allowlisted; skipping send.`);
           throw new Error("That email is not approved for FabSheet sign-in.");
         }

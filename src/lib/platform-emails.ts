@@ -38,6 +38,23 @@ export function isAllowedEmail(email: string | null | undefined): boolean {
   return allowedEmails().includes(normalizeEmail(email));
 }
 
+export async function isSignInEmailAllowed(email: string | null | undefined): Promise<boolean> {
+  const clean = normalizeEmail(email);
+  if (!clean) return false;
+  if (isAllowedEmail(clean)) return true;
+  if ((process.env.AUTH_MODE ?? "allowlist") !== "allowlist") return true;
+
+  const { prisma } = await import("@/lib/db");
+  const user = await prisma.user.findUnique({ where: { email: clean }, select: { active: true } });
+  let invite: { id: string } | null = null;
+  try {
+    invite = await prisma.tenantInvite.findFirst({ where: { email: clean, active: true }, select: { id: true } });
+  } catch {
+    invite = null;
+  }
+  return Boolean(user?.active || invite);
+}
+
 export function isOwnerEmail(email: string | null | undefined): boolean {
   return ownerEmails().includes(normalizeEmail(email));
 }

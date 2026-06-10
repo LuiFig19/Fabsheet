@@ -16,7 +16,10 @@ export function LoginForm({ nextUrl, initialError }: { nextUrl: string; initialE
   // click. App is served at the domain root now, so it's just origin + path.
   function absoluteCallback(path: string): string {
     if (typeof window === "undefined") return path;
+    const currentParts = window.location.pathname.split("/");
+    const tenantPrefix = currentParts[1] === "c" && currentParts[2] ? `/c/${currentParts[2]}` : "";
     const clean = path.startsWith("/") ? path : `/${path}`;
+    if (tenantPrefix && !clean.startsWith(`${tenantPrefix}/`)) return window.location.origin + tenantPrefix + clean;
     return window.location.origin + clean;
   }
 

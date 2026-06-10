@@ -45,6 +45,9 @@ async function main() {
   const division = await prisma.division.create({
     data: { tenantId: tenant.id, name: "Welding", slug: "welding", contactEmail: "office@ravensmarine.com" },
   });
+  await prisma.tenantDomain.create({
+    data: { tenantId: tenant.id, hostname: "fabsheet.org", primary: true },
+  });
   const t = tenant.id;
   const d = division.id;
 
@@ -59,6 +62,10 @@ async function main() {
       { tenantId: t, email: "jose@ravensmarine.local", name: "Jose Verifier", role: "hr" },
       { tenantId: t, email: "owner@ravensmarine.local", name: "Raven's Big Honcho", role: "manager" },
     ],
+  });
+  const seededUsers = await prisma.user.findMany({ where: { tenantId: t }, select: { id: true, email: true, role: true } });
+  await prisma.tenantMembership.createMany({
+    data: seededUsers.map((user) => ({ tenantId: t, userId: user.id, role: user.role, active: true })),
   });
 
   await prisma.company.create({ data: { tenantId: t, name: COMPANY_NAME } });

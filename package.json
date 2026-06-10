@@ -13,6 +13,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:backfill": "tsx prisma/backfill-tenant.ts",
+    "db:backfill-memberships": "tsx prisma/backfill-memberships.ts",
     "db:studio": "prisma studio",
     "drizzle:generate": "drizzle-kit generate",
     "drizzle:push": "drizzle-kit push",

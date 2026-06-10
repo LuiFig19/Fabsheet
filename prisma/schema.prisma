@@ -25,6 +25,20 @@ model Tenant {
   updatedAt    DateTime   @updatedAt
   divisions    Division[]
   users        User[]
+  domains      TenantDomain[]
+  memberships  TenantMembership[]
+  invites      TenantInvite[]
+}
+
+model TenantDomain {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  hostname  String   @unique
+  primary   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
 }
 
 model Division {
@@ -62,7 +76,42 @@ model User {
   // BetterAuth relations
   sessions       Session[]
   accounts       Account[]
+  memberships    TenantMembership[]
 
+  @@index([tenantId])
+}
+
+model TenantMembership {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String   @default("manager")
+  divisionAccess String[] @default([])
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model TenantInvite {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email          String
+  role           String    @default("manager")
+  divisionAccess String[]  @default([])
+  active         Boolean   @default(true)
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([tenantId, email])
+  @@index([email])
   @@index([tenantId])
 }
 

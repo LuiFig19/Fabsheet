@@ -10,6 +10,8 @@ export type TenantContext = {
   tenant: Tenant;
   division: Division | null;
   user: User | null;
+  role: string | null;
+  divisionAccess: string[];
   mode: TenancyMode;
 };
 
@@ -57,7 +59,7 @@ export const getTenantContext = cache(async (): Promise<TenantContext> => {
     if (user && user.tenantId !== tenant.id) {
       user = await prisma.user.update({ where: { id: user.id }, data: { tenantId: tenant.id, lastLoginAt: new Date() } });
     }
-    return { tenant, division, user, mode };
+    return { tenant, division, user, role: user?.role ?? null, divisionAccess: user?.divisionAccess ?? [], mode };
   }
 
   // multi_tenant
@@ -65,13 +67,14 @@ export const getTenantContext = cache(async (): Promise<TenantContext> => {
   const slug = h.get("x-tenant-slug");
   if (!slug) throw new Error("No tenant slug in URL.");
   const tenant = await resolveTenant(slug);
-  if (sessionUser.tenantId && sessionUser.tenantId !== tenant.id) {
+  const access = await resolveTenantAccess(sessionUser, tenant.id);
+  if (!access) {
     throw new Error("Forbidden: user does not belong to this tenant.");
   }
   if (!sessionUser.active) throw new Error("Account is disabled.");
   const divisions = await prisma.division.findMany({ where: { tenantId: tenant.id, active: true }, orderBy: { createdAt: "asc" } });
   const division = pickDivision(divisions, h.get("x-division-id"));
-  return { tenant, division, user: sessionUser, mode };
+  return { tenant, division, user: sessionUser, role: access.role, divisionAccess: access.divisionAccess, mode };
 });
 
 /** Non-throwing variant for shared chrome (layout, metadata) that must render
@@ -96,6 +99,43 @@ async function resolveTenant(slug: string): Promise<Tenant> {
   const tenant = await prisma.tenant.findUnique({ where: { slug } });
   if (!tenant) throw new Error(`Tenant "${slug}" not found. Run db:seed or db:backfill.`);
   return tenant;
+}
+
+async function resolveTenantAccess(user: User, tenantId: string): Promise<{ role: string; divisionAccess: string[] } | null> {
+  if (user.tenantId === tenantId) return { role: user.role, divisionAccess: user.divisionAccess };
+  const membership = await prisma.tenantMembership.findUnique({
+    where: { tenantId_userId: { tenantId, userId: user.id } },
+    select: { role: true, divisionAccess: true, active: true },
+  }).catch(() => null);
+  if (membership?.active) return { role: membership.role, divisionAccess: membership.divisionAccess };
+
+  const invite = await prisma.tenantInvite.findUnique({
+    where: { tenantId_email: { tenantId, email: user.email.toLowerCase() } },
+    select: { id: true, role: true, divisionAccess: true, active: true },
+  }).catch(() => null);
+  if (!invite?.active) return null;
+
+  await prisma.$transaction([
+    prisma.tenantMembership.upsert({
+      where: { tenantId_userId: { tenantId, userId: user.id } },
+      create: {
+        tenantId,
+        userId: user.id,
+        role: invite.role,
+        divisionAccess: invite.divisionAccess,
+        active: true,
+      },
+      update: {
+        role: invite.role,
+        divisionAccess: invite.divisionAccess,
+        active: true,
+      },
+    }),
+    prisma.tenantInvite.update({ where: { id: invite.id }, data: { acceptedAt: new Date() } }),
+    ...(user.tenantId ? [] : [prisma.user.update({ where: { id: user.id }, data: { tenantId, role: invite.role } })]),
+  ]);
+
+  return { role: invite.role, divisionAccess: invite.divisionAccess };
 }
 
 /**
