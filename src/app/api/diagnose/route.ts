@@ -59,6 +59,10 @@ export async function GET() {
       extractor: process.env.EXTRACTOR ?? null,
       anthropic_api_key_set: Boolean(process.env.ANTHROPIC_API_KEY),
       anthropic_model: process.env.ANTHROPIC_MODEL ?? null,
+      ocr_primary_model: process.env.OCR_PRIMARY_MODEL ?? "claude-haiku-4-5-20251001",
+      ocr_verification_model: process.env.OCR_VERIFICATION_MODEL ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
+      ocr_verify_mode: process.env.OCR_VERIFY_MODE ?? "adaptive",
+      ocr_double_scan: process.env.OCR_DOUBLE_SCAN ?? "true",
     },
     storage: {
       r2_account_id_set: Boolean(process.env.R2_ACCOUNT_ID),
